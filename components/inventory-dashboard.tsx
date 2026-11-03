@@ -16,6 +16,7 @@ import {
   Filter,
   Gavel,
   LayoutDashboard,
+  LogOut,
   Menu,
   PackageCheck,
   Plus,
@@ -27,6 +28,19 @@ import {
   Truck,
   X,
 } from 'lucide-react'
+import { signOut } from 'firebase/auth'
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query as firestoreQuery,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  type DocumentData,
+} from 'firebase/firestore'
+import { auth, db } from '@/lib/firebase'
 import {
   Bar,
   BarChart,
@@ -48,13 +62,91 @@ const categories = [
   { label: 'Funcionais', count: 96, icon: PackageCheck, color: 'bg-[#728c45]', accent: '#728c45' },
 ]
 
-const items = [
-  { id: 'INV-2024-0186', item: 'Notebook Dell Latitude 5420', type: 'Informática', serial: '8XK9Q22', tag: 'PAT-004218', date: '18/09/2024', age: '1 ano', status: 'Armazenado', categories: ['Com patrimônio', 'Funcionais'], auction: false },
-  { id: 'INV-2024-0185', item: 'Monitor LG 24” LED', type: 'Informática', serial: 'N/A', tag: '—', date: '16/09/2024', age: '1 ano', status: 'Armazenado', categories: ['Sem patrimônio', 'Sem garantia'], auction: true },
-  { id: 'INV-2024-0184', item: 'Cadeira giratória presidente', type: 'Mobiliário', serial: 'N/A', tag: 'PAT-003917', date: '14/09/2024', age: '1 ano', status: 'Retirado', categories: ['Com patrimônio'], auction: false },
-  { id: 'INV-2024-0183', item: 'Impressora HP LaserJet Pro', type: 'Informática', serial: 'VNB3K1804', tag: 'PAT-004012', date: '11/09/2024', age: '1 ano', status: 'Armazenado', categories: ['Com patrimônio', 'Sem garantia'], auction: true },
-  { id: 'INV-2024-0182', item: 'Armário de aço 2 portas', type: 'Mobiliário', serial: 'N/A', tag: '—', date: '09/09/2024', age: '1 ano', status: 'Armazenado', categories: ['Sem patrimônio', 'Funcionais'], auction: false },
-]
+type Item = {
+  docId: string
+  id: string
+  item: string
+  type: string
+  serial: string
+  tag: string
+  date: string
+  age: string
+  status: string
+  categories: string[]
+  auction: boolean
+}
+
+type NewItemData = {
+  name: string
+  type: string
+  model: string
+  tag: string
+  serial: string
+  serviceTag: string
+  registeredAt: string
+  categories: string[]
+}
+
+const itemTypes = ['Monitores', 'Teclados', 'Mouses', 'Dockstations', 'APs', 'Telefones', 'Placas de circuito', 'Placas de vídeo', 'Baterias', 'Memória RAM', 'HDs', 'Fontes', 'Extensões de tomada', 'Webcams', 'Impressoras', 'Leitores de DVD']
+
+function formatDate(isoDate?: string) {
+  if (!isoDate) return ''
+  const [year, month, day] = isoDate.split('-')
+  return `${day}/${month}/${year}`
+}
+
+function ageFrom(isoDate?: string) {
+  if (!isoDate) return ''
+  const days = Math.max(0, Math.floor((Date.now() - new Date(`${isoDate}T00:00:00`).getTime()) / 86400000))
+  if (days < 1) return 'hoje'
+  if (days < 30) return `${days} ${days === 1 ? 'dia' : 'dias'}`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months} ${months === 1 ? 'mês' : 'meses'}`
+  const years = Math.floor(months / 12)
+  return `${years} ${years === 1 ? 'ano' : 'anos'}`
+}
+
+function toItem(docId: string, data: DocumentData): Item {
+  return {
+    docId,
+    id: data.code ?? docId,
+    item: data.name ?? '',
+    type: data.type ?? '',
+    serial: data.serial || 'N/A',
+    tag: data.tag || '—',
+    date: formatDate(data.registeredAt),
+    age: ageFrom(data.registeredAt),
+    status: data.status ?? 'Armazenado',
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    auction: Boolean(data.auction),
+  }
+}
+
+// Cria o item e gera o código sequencial (INV-ANO-0001) numa transação, para não repetir números.
+async function createItem(data: NewItemData) {
+  const counterRef = doc(db, 'counters', 'inserviveis')
+  const itemRef = doc(collection(db, 'inserviveis'))
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(counterRef)
+    const next = (snapshot.exists() ? Number(snapshot.data().value) : 0) + 1
+    const year = data.registeredAt.slice(0, 4) || String(new Date().getFullYear())
+    transaction.set(counterRef, { value: next })
+    transaction.set(itemRef, {
+      code: `INV-${year}-${String(next).padStart(4, '0')}`,
+      name: data.name.trim(),
+      type: data.type,
+      model: data.model.trim(),
+      tag: data.tag.trim(),
+      serial: data.serial.trim(),
+      serviceTag: data.serviceTag.trim(),
+      registeredAt: data.registeredAt,
+      status: 'Armazenado',
+      categories: data.categories,
+      auction: false,
+      createdAt: serverTimestamp(),
+    })
+  })
+}
 
 const periodData = [
   { name: '2026 Jan', cadastrados: 28 }, { name: '2026 Fev', cadastrados: 35 }, { name: '2026 Mar', cadastrados: 42 }, { name: '2026 Abr', cadastrados: 31 }, { name: '2026 Mai', cadastrados: 48 }, { name: '2026 Jun', cadastrados: 42 }, { name: '2026 Jul', cadastrados: 68 }, { name: '2026 Ago', cadastrados: 55 }, { name: '2026 Set', cadastrados: 74 }, { name: '2026 Out', cadastrados: 61 }, { name: '2026 Nov', cadastrados: 53 }, { name: '2026 Dez', cadastrados: 47 },
@@ -92,7 +184,7 @@ const reportColumns: { header: string; key: keyof ReportRow; width: number }[] =
   { header: 'Leiloado', key: 'auction', width: 11 },
 ]
 
-function buildReportRows(rows: typeof items, overrides: Record<string, boolean>): ReportRow[] {
+function buildReportRows(rows: Item[]): ReportRow[] {
   return rows.map((item) => ({
     id: item.id,
     item: item.item,
@@ -103,7 +195,7 @@ function buildReportRows(rows: typeof items, overrides: Record<string, boolean>)
     age: item.age,
     status: item.status,
     categories: item.categories.join(', '),
-    auction: (overrides[item.id] ?? item.auction) ? 'Sim' : 'Não',
+    auction: item.auction ? 'Sim' : 'Não',
   }))
 }
 
@@ -227,8 +319,17 @@ export default function InventoryDashboard() {
   const [showNew, setShowNew] = useState(false)
   const [showMobileNav, setShowMobileNav] = useState(false)
   const [toast, setToast] = useState('')
-  const [auctionOverrides, setAuctionOverrides] = useState<Record<string, boolean>>({})
   const [selectedPeriod, setSelectedPeriod] = useState('2026-2027')
+  const [items, setItems] = useState<Item[]>([])
+
+  useEffect(() => {
+    const itemsQuery = firestoreQuery(collection(db, 'inserviveis'), orderBy('createdAt', 'desc'))
+    return onSnapshot(
+      itemsQuery,
+      (snapshot) => setItems(snapshot.docs.map((entry) => toItem(entry.id, entry.data()))),
+      () => setToast('Não foi possível carregar os itens'),
+    )
+  }, [])
   const visiblePeriodData = useMemo(() => {
     const [start, end] = selectedPeriod.split('-').map(Number)
     return periodData.filter((entry) => {
@@ -241,16 +342,26 @@ export default function InventoryDashboard() {
     const matchesQuery = `${item.item} ${item.id} ${item.serial} ${item.tag}`.toLowerCase().includes(query.toLowerCase())
     const matchesCategory = selectedCategories.length === 0 || item.categories.some((category) => selectedCategories.includes(category))
     return matchesQuery && matchesCategory
-  }), [query, selectedCategories])
+  }), [items, query, selectedCategories])
 
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600) }
+
+  const setAuction = async (id: string, value: boolean) => {
+    const target = items.find((entry) => entry.id === id)
+    if (!target) return
+    try {
+      await updateDoc(doc(db, 'inserviveis', target.docId), { auction: value })
+    } catch {
+      notify('Não foi possível salvar a alteração')
+    }
+  }
 
   const downloadReport = async (format: string) => {
     const normalized = format.toLowerCase()
     const kind = normalized.includes('csv') ? 'csv' : normalized.includes('pdf') ? 'pdf' : /xls|excel/.test(normalized) ? 'xlsx' : null
     if (!kind) { notify(`Relatório ${format.toUpperCase()} preparado para download`); return }
     if (filteredItems.length === 0) { notify('Nenhum item para exportar com os filtros atuais'); return }
-    const rows = buildReportRows(filteredItems, auctionOverrides)
+    const rows = buildReportRows(filteredItems)
     const filename = `relatorio-inserviveis-${new Date().toLocaleDateString('en-CA')}`
     const filterLabel = [
       selectedCategories.length > 0 ? `Categorias: ${selectedCategories.join(', ')}` : 'Todas as categorias',
@@ -275,7 +386,7 @@ export default function InventoryDashboard() {
         <p className="nav-caption nav-caption-spaced">CATEGORIAS</p>
         {categories.map(({ label, count, icon: Icon, color }) => <button key={label} className={`category-link ${selectedCategories.includes(label) ? 'selected' : ''}`} onClick={() => { setSelectedCategories((current) => (current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span></button>)}
       </nav>
-      <div className="sidebar-bottom"><button className="nav-link"><Settings2 size={18} />Configurações</button><div className="profile"><div className="avatar">JS</div><div><strong>Julio Simões</strong><small>Administrador</small></div><ChevronDown size={15} className="ml-auto text-slate-400" /></div></div>
+      <div className="sidebar-bottom"><button className="nav-link"><Settings2 size={18} />Configurações</button><button className="nav-link" onClick={() => void signOut(auth)}><LogOut size={18} />Sair</button><div className="profile"><div className="avatar">JS</div><div><strong>Julio Simões</strong><small>Administrador</small></div><ChevronDown size={15} className="ml-auto text-slate-400" /></div></div>
     </aside>
 
     <main className="main-content">
@@ -302,39 +413,73 @@ export default function InventoryDashboard() {
     <button className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40" disabled={selectedCategories.length === 0} onClick={() => setSelectedCategories([])}>Limpar</button>
     <button className="primary-button small" onClick={() => setFilterAnchor(null)}>Concluir</button>
   </div>
-</FloatingPanel>}<button className="primary-button small" onClick={() => setShowNew(true)}><Plus size={15} />Novo item</button></div></div><InventoryTable items={filteredItems} onNotify={notify} auctionOverrides={auctionOverrides} onAuctionChange={(id, value) => setAuctionOverrides((current) => ({ ...current, [id]: value }))} /></div>}
+</FloatingPanel>}<button className="primary-button small" onClick={() => setShowNew(true)}><Plus size={15} />Novo item</button></div></div><InventoryTable items={filteredItems} onNotify={notify} onAuctionChange={setAuction} /></div>}
 
-        {activeSection === 'Visão geral' && <div className="panel inventory-panel"><div className="panel-header"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema.</p></div><div className="panel-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item, serial ou patrimônio" /></div><button className="secondary-button small" onClick={() => setActiveSection('Inventário')}>Ver todos <ArrowDownToLine size={15} /></button></div></div><InventoryTable items={filteredItems.slice(0, 4)} onNotify={notify} auctionOverrides={auctionOverrides} onAuctionChange={(id, value) => setAuctionOverrides((current) => ({ ...current, [id]: value }))} /></div>}
+        {activeSection === 'Visão geral' && <div className="panel inventory-panel"><div className="panel-header"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema.</p></div><div className="panel-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item, serial ou patrimônio" /></div><button className="secondary-button small" onClick={() => setActiveSection('Inventário')}>Ver todos <ArrowDownToLine size={15} /></button></div></div><InventoryTable items={filteredItems.slice(0, 4)} onNotify={notify} onAuctionChange={setAuction} /></div>}
       </div>
     </main>
-    {showNew && <NewItemModal onClose={() => setShowNew(false)} onSave={() => { setShowNew(false); notify('Item cadastrado com sucesso') }} />}
+    {showNew && <NewItemModal onClose={() => setShowNew(false)} onSave={async (data) => { await createItem(data); setShowNew(false); notify('Item cadastrado com sucesso') }} />}
     {toast && <div className="toast"><Check size={17} />{toast}</div>}
   </div>
 }
 
-function InventoryTable({ items: rows, onNotify, auctionOverrides, onAuctionChange }: { items: typeof items; onNotify: (message: string) => void; auctionOverrides: Record<string, boolean>; onAuctionChange: (id: string, value: boolean) => void }) {
+function InventoryTable({ items: rows, onNotify, onAuctionChange }: { items: Item[]; onNotify: (message: string) => void; onAuctionChange: (id: string, value: boolean) => void | Promise<void> }) {
   const [menu, setMenu] = useState<{ id: string; rect: DOMRect } | null>(null)
 
-  return <div className="table-scroll"><table className="inventory-table"><thead><tr><th>ITEM</th><th>IDENTIFICAÇÃO</th><th>CADASTRO</th><th>CATEGORIAS</th><th>STATUS</th><th>LEILOADO</th><th /></tr></thead><tbody>{rows.map((item) => { const isAuctioned = auctionOverrides[item.id] ?? item.auction; return <tr key={item.id}><td><div className="item-cell"><div className="item-thumb"><Box size={17} /></div><div><strong>{item.item}</strong><small>{item.id} · {item.type}</small></div></div></td><td><span className="mono">{item.serial}</span><small className="table-sub">{item.tag}</small></td><td><span>{item.date}</span><small className="table-sub">Há {item.age}</small></td><td><div className="tag-list">{item.categories.slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}</div></td><td><span className={`status-badge ${item.status === 'Retirado' ? 'retired' : ''}`}><i />{item.status}</span></td><td>{isAuctioned ? <span className="auction-yes"><Gavel size={13} />Sim</span> : <span className="auction-no">Não</span>}</td><td><button className="row-menu" data-popover-trigger aria-haspopup="dialog" aria-label={`Marcar ${item.id} como leiloado`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu((current) => (current?.id === item.id ? null : { id: item.id, rect })) }}>•••</button></td></tr> })}</tbody></table>{menu && <FloatingPanel anchor={menu.rect} width={188} label={`Marcar ${menu.id} como leiloado`} onClose={() => setMenu(null)}>
+  return <div className="table-scroll"><table className="inventory-table"><thead><tr><th>ITEM</th><th>IDENTIFICAÇÃO</th><th>CADASTRO</th><th>CATEGORIAS</th><th>STATUS</th><th>LEILOADO</th><th /></tr></thead><tbody>{rows.map((item) => { const isAuctioned = item.auction; return <tr key={item.id}><td><div className="item-cell"><div className="item-thumb"><Box size={17} /></div><div><strong>{item.item}</strong><small>{item.id} · {item.type}</small></div></div></td><td><span className="mono">{item.serial}</span><small className="table-sub">{item.tag}</small></td><td><span>{item.date}</span><small className="table-sub">{item.age === 'hoje' ? 'Cadastrado hoje' : `Há ${item.age}`}</small></td><td><div className="tag-list">{item.categories.slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}</div></td><td><span className={`status-badge ${item.status === 'Retirado' ? 'retired' : ''}`}><i />{item.status}</span></td><td>{isAuctioned ? <span className="auction-yes"><Gavel size={13} />Sim</span> : <span className="auction-no">Não</span>}</td><td><button className="row-menu" data-popover-trigger aria-haspopup="dialog" aria-label={`Marcar ${item.id} como leiloado`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu((current) => (current?.id === item.id ? null : { id: item.id, rect })) }}>•••</button></td></tr> })}</tbody></table>{rows.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">Nenhum item cadastrado ainda. Use o botão “Novo item” para começar.</p>}{menu && <FloatingPanel anchor={menu.rect} width={188} label={`Marcar ${menu.id} como leiloado`} onClose={() => setMenu(null)}>
   <p className="mb-2 text-sm font-medium text-slate-800">O item {menu.id} foi leiloado?</p>
   <div className="flex gap-2">
-    {([['Sim', true], ['Não', false]] as const).map(([label, value]) => <button key={label} className={`${(auctionOverrides[menu.id] ?? rows.find((row) => row.id === menu.id)?.auction ?? false) === value ? 'primary-button' : 'secondary-button'} small flex-1 justify-center`} onClick={() => { onAuctionChange(menu.id, value); onNotify(`${menu.id}: leiloado marcado como ${label}`); setMenu(null) }}>{label}</button>)}
+    {([['Sim', true], ['Não', false]] as const).map(([label, value]) => <button key={label} className={`${(rows.find((row) => row.id === menu.id)?.auction ?? false) === value ? 'primary-button' : 'secondary-button'} small flex-1 justify-center`} onClick={() => { onAuctionChange(menu.id, value); onNotify(`${menu.id}: leiloado marcado como ${label}`); setMenu(null) }}>{label}</button>)}
   </div>
 </FloatingPanel>}</div>
 }
 
-function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: () => void }) { return <div className="modal-backdrop"><div className="modal-card"><div className="modal-head"><div><p className="eyebrow">NOVO REGISTRO</p><h2>Cadastrar inservível</h2><p>Informe os dados para adicionar um material ao estoque.</p></div><button className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div><div className="form-grid"><label>Nome do item<input placeholder="Ex.: Notebook Dell Latitude" /></label><label>Tipo de item<select defaultValue=""><option value="" disabled>Selecione</option><option>Monitores</option><option>Teclados</option><option>Mouses</option><option>Dockstations</option><option>APs</option><option>Telefones</option><option>Placas de circuito</option><option>Placas de vídeo</option><option>Baterias</option><option>Memória RAM</option><option>HDs</option><option>Fontes</option><option>Extensões de tomada</option><option>Webcams</option><option>Impressoras</option><option>Leitores de DVD</option></select></label><label>Modelo<input placeholder="Ex.: Latitude 5420" /></label><label>Patrimônio<input placeholder="Ex.: PAT-004218" /></label><label>Serial number<input placeholder="Informe o serial" /></label><label>Service tag <span>(opcional)</span><input placeholder="Informe a service tag" /></label><label>Data de cadastro<input type="date" defaultValue="2024-09-30" /></label></div><fieldset><legend>Categorias do inservível</legend><div className="check-grid">{categories.map((category) => <label key={category.label}><input type="checkbox" defaultChecked={category.label === 'Sem garantia'} />{category.label}</label>)}</div></fieldset><div className="modal-note"><AlertTriangle size={16} /><span>Itens sem garantia terão o tempo de armazenamento calculado automaticamente a partir da data de cadastro.</span></div><div className="modal-footer"><button className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" onClick={onSave}><Check size={16} />Salvar item</button></div></div></div> }
+function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data: NewItemData) => Promise<void> }) {
+  const [form, setForm] = useState<NewItemData>({
+    name: '',
+    type: '',
+    model: '',
+    tag: '',
+    serial: '',
+    serviceTag: '',
+    registeredAt: new Date().toLocaleDateString('en-CA'),
+    categories: ['Sem garantia'],
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-/*
- * Integração Firebase (intencionalmente não ativa neste protótipo visual):
- * 1. Instale firebase e firebase-admin.
- * 2. Crie um app Web no Firebase Console e configure as variáveis
- *    NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
- *    NEXT_PUBLIC_FIREBASE_PROJECT_ID, NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
- *    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID e NEXT_PUBLIC_FIREBASE_APP_ID.
- * 3. Inicialize o client SDK em lib/firebase.ts com initializeApp() e
- *    getFirestore(). Use uma coleção `inserviveis` para os cadastros.
- * 4. Substitua os dados demonstrativos por queries onSnapshot() e envie
- *    novos itens com addDoc(), mantendo as regras do Firestore restritas
- *    a usuários autenticados.
- */
+  const update = (field: keyof Omit<NewItemData, 'categories'>, value: string) => setForm((current) => ({ ...current, [field]: value }))
+  const toggleCategory = (label: string) => setForm((current) => ({
+    ...current,
+    categories: current.categories.includes(label) ? current.categories.filter((name) => name !== label) : [...current.categories, label],
+  }))
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.type) { setError('Informe o nome e o tipo do item.'); return }
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(form)
+    } catch {
+      setError('Não foi possível salvar o item. Tente novamente.')
+      setSaving(false)
+    }
+  }
+
+  return <div className="modal-backdrop"><div className="modal-card">
+    <div className="modal-head"><div><p className="eyebrow">NOVO REGISTRO</p><h2>Cadastrar inservível</h2><p>Informe os dados para adicionar um material ao estoque.</p></div><button className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div>
+    <div className="form-grid">
+      <label>Nome do item<input value={form.name} onChange={(event) => update('name', event.target.value)} placeholder="Ex.: Notebook Dell Latitude" /></label>
+      <label>Tipo de item<select value={form.type} onChange={(event) => update('type', event.target.value)}><option value="" disabled>Selecione</option>{itemTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+      <label>Modelo<input value={form.model} onChange={(event) => update('model', event.target.value)} placeholder="Ex.: Latitude 5420" /></label>
+      <label>Patrimônio<input value={form.tag} onChange={(event) => update('tag', event.target.value)} placeholder="Ex.: PAT-004218" /></label>
+      <label>Serial number<input value={form.serial} onChange={(event) => update('serial', event.target.value)} placeholder="Informe o serial" /></label>
+      <label>Service tag <span>(opcional)</span><input value={form.serviceTag} onChange={(event) => update('serviceTag', event.target.value)} placeholder="Informe a service tag" /></label>
+      <label>Data de cadastro<input type="date" value={form.registeredAt} onChange={(event) => update('registeredAt', event.target.value)} /></label>
+    </div>
+    <fieldset><legend>Categorias do inservível</legend><div className="check-grid">{categories.map((category) => <label key={category.label}><input type="checkbox" checked={form.categories.includes(category.label)} onChange={() => toggleCategory(category.label)} />{category.label}</label>)}</div></fieldset>
+    <div className="modal-note"><AlertTriangle size={16} /><span>Itens sem garantia terão o tempo de armazenamento calculado automaticamente a partir da data de cadastro.</span></div>
+    {error && <p className="px-1 text-sm text-red-600">{error}</p>}
+    <div className="modal-footer"><button className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" onClick={submit} disabled={saving}><Check size={16} />{saving ? 'Salvando…' : 'Salvar item'}</button></div>
+  </div></div>
+}
