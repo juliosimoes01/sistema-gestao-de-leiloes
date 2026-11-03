@@ -55,13 +55,6 @@ import {
   YAxis,
 } from 'recharts'
 
-const categories = [
-  { label: 'Com patrimônio', count: 186, icon: Tag, color: 'bg-[#234e70]', accent: '#234e70' },
-  { label: 'Sem patrimônio', count: 274, icon: Box, color: 'bg-[#4f8a81]', accent: '#4f8a81' },
-  { label: 'Sem garantia', count: 158, icon: ShieldAlert, color: 'bg-[#c98235]', accent: '#c98235' },
-  { label: 'Funcionais', count: 96, icon: PackageCheck, color: 'bg-[#728c45]', accent: '#728c45' },
-]
-
 type Item = {
   docId: string
   id: string
@@ -70,6 +63,7 @@ type Item = {
   serial: string
   tag: string
   date: string
+  rawRegisteredAt: string
   age: string
   status: string
   categories: string[]
@@ -88,6 +82,8 @@ type NewItemData = {
 }
 
 const itemTypes = ['Monitores', 'Teclados', 'Mouses', 'Dockstations', 'APs', 'Telefones', 'Placas de circuito', 'Placas de vídeo', 'Baterias', 'Memória RAM', 'HDs', 'Fontes', 'Extensões de tomada', 'Webcams', 'Impressoras', 'Leitores de DVD']
+
+const PIE_COLORS = ['#234e70', '#4f8a81', '#c98235', '#728c45', '#687786', '#a259ff', '#f24e1e', '#0acf83']
 
 function formatDate(isoDate?: string) {
   if (!isoDate) return ''
@@ -115,6 +111,7 @@ function toItem(docId: string, data: DocumentData): Item {
     serial: data.serial || 'N/A',
     tag: data.tag || '—',
     date: formatDate(data.registeredAt),
+    rawRegisteredAt: data.registeredAt ?? '',
     age: ageFrom(data.registeredAt),
     status: data.status ?? 'Armazenado',
     categories: Array.isArray(data.categories) ? data.categories : [],
@@ -122,7 +119,6 @@ function toItem(docId: string, data: DocumentData): Item {
   }
 }
 
-// Cria o item e gera o código sequencial (INV-ANO-0001) numa transação, para não repetir números.
 async function createItem(data: NewItemData) {
   const counterRef = doc(db, 'counters', 'inserviveis')
   const itemRef = doc(collection(db, 'inserviveis'))
@@ -148,25 +144,9 @@ async function createItem(data: NewItemData) {
   })
 }
 
-const periodData = [
-  { name: '2026 Jan', cadastrados: 28 }, { name: '2026 Fev', cadastrados: 35 }, { name: '2026 Mar', cadastrados: 42 }, { name: '2026 Abr', cadastrados: 31 }, { name: '2026 Mai', cadastrados: 48 }, { name: '2026 Jun', cadastrados: 42 }, { name: '2026 Jul', cadastrados: 68 }, { name: '2026 Ago', cadastrados: 55 }, { name: '2026 Set', cadastrados: 74 }, { name: '2026 Out', cadastrados: 61 }, { name: '2026 Nov', cadastrados: 53 }, { name: '2026 Dez', cadastrados: 47 },
-  { name: '2027 Jan', cadastrados: 39 }, { name: '2027 Fev', cadastrados: 44 }, { name: '2027 Mar', cadastrados: 58 }, { name: '2027 Abr', cadastrados: 63 }, { name: '2027 Mai', cadastrados: 71 }, { name: '2027 Jun', cadastrados: 66 }, { name: '2027 Jul', cadastrados: 52 }, { name: '2027 Ago', cadastrados: 69 }, { name: '2027 Set', cadastrados: 77 }, { name: '2027 Out', cadastrados: 64 }, { name: '2027 Nov', cadastrados: 59 }, { name: '2027 Dez', cadastrados: 73 },
-  { name: '2028 Jan', cadastrados: 46 }, { name: '2028 Fev', cadastrados: 51 }, { name: '2028 Mar', cadastrados: 62 }, { name: '2028 Abr', cadastrados: 57 }, { name: '2028 Mai', cadastrados: 75 }, { name: '2028 Jun', cadastrados: 68 }, { name: '2028 Jul', cadastrados: 81 }, { name: '2028 Ago', cadastrados: 72 }, { name: '2028 Set', cadastrados: 86 }, { name: '2028 Out', cadastrados: 78 }, { name: '2028 Nov', cadastrados: 70 }, { name: '2028 Dez', cadastrados: 84 },
-  { name: '2029 Jan', cadastrados: 61 }, { name: '2029 Fev', cadastrados: 66 }, { name: '2029 Mar', cadastrados: 74 }, { name: '2029 Abr', cadastrados: 69 }, { name: '2029 Mai', cadastrados: 88 }, { name: '2029 Jun', cadastrados: 79 }, { name: '2029 Jul', cadastrados: 92 }, { name: '2029 Ago', cadastrados: 85 }, { name: '2029 Set', cadastrados: 97 }, { name: '2029 Out', cadastrados: 90 }, { name: '2029 Nov', cadastrados: 83 }, { name: '2029 Dez', cadastrados: 101 },
-  { name: '2030 Jan', cadastrados: 72 }, { name: '2030 Fev', cadastrados: 78 }, { name: '2030 Mar', cadastrados: 86 }, { name: '2030 Abr', cadastrados: 80 }, { name: '2030 Mai', cadastrados: 95 }, { name: '2030 Jun', cadastrados: 89 },
-]
-
-const pieData = [
-  { name: 'Mouses', value: 34, color: '#234e70' },
-  { name: 'Teclados', value: 42, color: '#4f8a81' },
-  { name: 'Headsets', value: 27, color: '#c98235' },
-  { name: 'Monitores', value: 58, color: '#728c45' },
-  { name: 'Outros itens de informática', value: 68, color: '#687786' },
-]
-
-function MetricCard({ label, value, detail, icon: Icon, tone = 'blue' }: { label: string; value: string; detail: string; icon: typeof Box; tone?: string }) {
+function MetricCard({ label, value, detail, icon: Icon, tone = 'blue' }: { label: string; value: string | number; detail: string; icon: typeof Box; tone?: string }) {
   const tones: Record<string, string> = { blue: 'bg-[#eaf2f8] text-[#234e70]', green: 'bg-[#edf5ed] text-[#567341]', amber: 'bg-[#fff3e3] text-[#b46c1c]', navy: 'bg-[#eef1f3] text-[#3d5061]' }
-  return <div className="metric-card"><div className={`metric-icon ${tones[tone]}`}><Icon size={19} strokeWidth={1.8} /></div><div className="min-w-0"><p className="metric-label">{label}</p><p className="metric-value">{value}</p><p className="metric-detail">{detail}</p></div><span className="metric-trend">+12,4%</span></div>
+  return <div className="metric-card"><div className={`metric-icon ${tones[tone]}`}><Icon size={19} strokeWidth={1.8} /></div><div className="min-w-0"><p className="metric-label">{label}</p><p className="metric-value">{value}</p><p className="metric-detail">{detail}</p></div></div>
 }
 
 type ReportRow = Record<'id' | 'item' | 'type' | 'serial' | 'tag' | 'date' | 'age' | 'status' | 'categories' | 'auction', string>
@@ -211,7 +191,6 @@ function saveBlob(blob: Blob, filename: string) {
 }
 
 function exportCsv(rows: ReportRow[], filename: string) {
-  // Ponto e vírgula + BOM: o Excel em português abre as colunas separadas e com acentos corretos.
   const cell = (value: string) => {
     const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
     return `"${safe.replace(/"/g, '""')}"`
@@ -279,7 +258,6 @@ async function exportPdf(rows: ReportRow[], filename: string, filterLabel: strin
   doc.save(`${filename}.pdf`)
 }
 
-// Janela pequena ancorada a um botão. Usa position: fixed para não ser cortada pela rolagem da tabela.
 function FloatingPanel({ anchor, width, label, onClose, children }: { anchor: DOMRect; width: number; label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -330,13 +308,81 @@ export default function InventoryDashboard() {
       () => setToast('Não foi possível carregar os itens'),
     )
   }, [])
-  const visiblePeriodData = useMemo(() => {
-    const [start, end] = selectedPeriod.split('-').map(Number)
-    return periodData.filter((entry) => {
-      const year = Number(entry.name.slice(0, 4))
-      return year >= start && year <= end
+
+  // --- CÁLCULO DE CATEGORIAS DINÂMICAS PARA A SIDEBAR ---
+  const dynamicCategories = useMemo(() => {
+    const baseCategories = [
+      { label: 'Com patrimônio', icon: Tag, color: 'bg-[#234e70]', accent: '#234e70' },
+      { label: 'Sem patrimônio', icon: Box, color: 'bg-[#4f8a81]', accent: '#4f8a81' },
+      { label: 'Sem garantia', icon: ShieldAlert, color: 'bg-[#c98235]', accent: '#c98235' },
+      { label: 'Funcionais', icon: PackageCheck, color: 'bg-[#728c45]', accent: '#728c45' },
+    ]
+
+    return baseCategories.map(cat => ({
+      ...cat,
+      count: items.filter(item => item.categories.includes(cat.label)).length
+    }))
+  }, [items])
+
+  // --- CÁLCULOS DAS MÉTRICAS DO TOPO ---
+  const totalInserviveis = items.length
+  const aguardandoLeilaoCount = useMemo(() => items.filter(i => i.auction).length, [items])
+  const retiradosCount = useMemo(() => items.filter(i => i.status === 'Retirado').length, [items])
+  
+  const cadastradosNoMesCount = useMemo(() => {
+    const now = new Date()
+    const currentYear = now.getFullYear()
+    const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
+    const prefix = `${currentYear}-${currentMonth}`
+    return items.filter(i => i.rawRegisteredAt && i.rawRegisteredAt.startsWith(prefix)).length
+  }, [items])
+
+  // --- GRÁFICO DINÂMICO POR TIPO DE ITEM ---
+  const pieDataDynamic = useMemo(() => {
+    const counts: Record<string, number> = {}
+    items.forEach(item => {
+      const t = item.type || 'Outros'
+      counts[t] = (counts[t] || 0) + 1
     })
-  }, [selectedPeriod])
+
+    return Object.entries(counts).map(([name, value], index) => ({
+      name,
+      value,
+      color: PIE_COLORS[index % PIE_COLORS.length]
+    }))
+  }, [items])
+
+  // --- GRÁFICO DINÂMICO DE MOVIMENTAÇÃO POR MÊS ---
+  const periodDataDynamic = useMemo(() => {
+    const monthMap: Record<string, number> = {}
+    items.forEach(item => {
+      if (item.rawRegisteredAt) {
+        const [y, m] = item.rawRegisteredAt.split('-')
+        const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+        const monthIndex = parseInt(m, 10) - 1
+        if (monthIndex >= 0 && monthIndex < 12) {
+          const key = `${y} ${monthNames[monthIndex]}`
+          monthMap[key] = (monthMap[key] || 0) + 1
+        }
+      }
+    })
+
+    const [start, end] = selectedPeriod.split('-').map(Number)
+    const result: { name: string; cadastrados: number }[] = []
+
+    for (let y = start; y <= end; y++) {
+      const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+      monthNames.forEach(m => {
+        const key = `${y} ${m}`
+        result.push({
+          name: key,
+          cadastrados: monthMap[key] || 0
+        })
+      })
+    }
+
+    return result
+  }, [items, selectedPeriod])
 
   const filteredItems = useMemo(() => items.filter((item) => {
     const matchesQuery = `${item.item} ${item.id} ${item.serial} ${item.tag}`.toLowerCase().includes(query.toLowerCase())
@@ -384,30 +430,109 @@ export default function InventoryDashboard() {
         <p className="nav-caption">GESTÃO</p>
         {[['Visão geral', LayoutDashboard], ['Inventário', ClipboardList]].map(([label, Icon]) => <button key={label as string} className={`nav-link ${activeSection === label ? 'active' : ''}`} onClick={() => { setActiveSection(label as string); setShowMobileNav(false) }}><Icon size={18} />{label as string}</button>)}
         <p className="nav-caption nav-caption-spaced">CATEGORIAS</p>
-        {categories.map(({ label, count, icon: Icon, color }) => <button key={label} className={`category-link ${selectedCategories.includes(label) ? 'selected' : ''}`} onClick={() => { setSelectedCategories((current) => (current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span></button>)}
+        {dynamicCategories.map(({ label, count, icon: Icon, color }) => <button key={label} className={`category-link ${selectedCategories.includes(label) ? 'selected' : ''}`} onClick={() => { setSelectedCategories((current) => (current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span></button>)}
       </nav>
-      <div className="sidebar-bottom"><button className="nav-link"><Settings2 size={18} />Configurações</button><button className="nav-link" onClick={() => void signOut(auth)}><LogOut size={18} />Sair</button><div className="profile"><div className="avatar">JS</div><div><strong>Julio Simões</strong><small>Administrador</small></div><ChevronDown size={15} className="ml-auto text-slate-400" /></div></div>
+      <div className="sidebar-bottom">
+        <button className={`nav-link ${activeSection === 'Configurações' ? 'active' : ''}`} onClick={() => { setActiveSection('Configurações'); setShowMobileNav(false) }}>
+          <Settings2 size={18} />Configurações
+        </button>
+        <button className="nav-link" onClick={() => void signOut(auth)}><LogOut size={18} />Sair</button>
+        <div className="profile"><div className="avatar">JS</div><div><strong>Julio Simões</strong><small>Administrador</small></div><ChevronDown size={15} className="ml-auto text-slate-400" /></div>
+      </div>
     </aside>
 
     <main className="main-content">
       <header className="topbar"><button className="mobile-menu" onClick={() => setShowMobileNav(true)} aria-label="Abrir menu"><Menu size={21} /></button><div className="breadcrumbs"><span>Inservíveis</span><span>/</span><strong>{activeSection}</strong>{activeCategory !== 'Todos os itens' && <><span>/</span><strong>{activeCategory}</strong></>}</div><div className="top-actions"><button className="icon-button" aria-label="Ajuda"><CircleHelp size={19} /></button><button className="icon-button notification" aria-label="Notificações"><Bell size={19} /><i /></button><div className="top-avatar">JS</div></div></header>
       <div className="content-wrap">
-        <div className="page-heading"><div><p className="eyebrow">CENTRAL DE OPERAÇÕES</p><h1>{activeSection === 'Visão geral' ? 'Visão geral' : activeSection}</h1><p className="page-description">Acompanhe o ciclo dos materiais inservíveis e prepare seus próximos leilões.</p></div><div className="heading-actions"><button className="secondary-button" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterAnchor(null); setDownloadAnchor((current) => (current ? null : rect)) }}><FileDown size={16} />Exportar relatório<ChevronDown size={15} /></button>{downloadAnchor && <FloatingPanel anchor={downloadAnchor} width={248} label="Exportar relatório" onClose={() => setDownloadAnchor(null)}>
+        <div className="page-heading"><div><p className="eyebrow">CENTRAL DE OPERAÇÕES</p><h1>{activeSection}</h1><p className="page-description">Acompanhe o ciclo dos materiais inservíveis e prepare seus próximos leilões.</p></div><div className="heading-actions"><button className="secondary-button" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterAnchor(null); setDownloadAnchor((current) => (current ? null : rect)) }}><FileDown size={16} />Exportar relatório<ChevronDown size={15} /></button>{downloadAnchor && <FloatingPanel anchor={downloadAnchor} width={248} label="Exportar relatório" onClose={() => setDownloadAnchor(null)}>
   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Exportar relatório</p>
   <button className="flex w-full flex-col rounded-md px-2 py-2 text-left hover:bg-slate-50" onClick={() => { setDownloadAnchor(null); void downloadReport('xlsx') }}><strong className="text-sm text-slate-800">Excel (.xlsx)</strong><small className="text-xs text-slate-500">Tabela formatada, com filtros nas colunas</small></button>
   <button className="flex w-full flex-col rounded-md px-2 py-2 text-left hover:bg-slate-50" onClick={() => { setDownloadAnchor(null); void downloadReport('csv') }}><strong className="text-sm text-slate-800">CSV (.csv)</strong><small className="text-xs text-slate-500">Texto separado por ponto e vírgula</small></button>
   <button className="flex w-full flex-col rounded-md px-2 py-2 text-left hover:bg-slate-50" onClick={() => { setDownloadAnchor(null); void downloadReport('pdf') }}><strong className="text-sm text-slate-800">PDF (.pdf)</strong><small className="text-xs text-slate-500">Documento pronto para imprimir ou enviar</small></button>
 </FloatingPanel>}<button className="primary-button" onClick={() => setShowNew(true)}><Plus size={17} />Cadastrar item</button></div></div>
 
-        {activeSection === 'Visão geral' ? <>
-          <div className="metrics-grid"><MetricCard label="Total de Inservíveis" value="618" detail="itens cadastrados" icon={Box} /><MetricCard label="Aguardando leilão" value="48" detail="itens prontos" icon={Gavel} tone="amber" /><MetricCard label="Cadastrados no mês" value="74" detail="+12,4% vs. mês anterior" icon={ClipboardList} tone="green" /><MetricCard label="Retirados" value="126" detail="20,4% do total" icon={Truck} tone="navy" /></div>
-          <div className="dashboard-grid"><div className="panel large-panel"><div className="panel-header"><div><h2>Movimentação de inservíveis</h2><p>Itens cadastrados por mês · 2026 a 2030</p></div><label className="period-select"><span className="sr-only">Período do gráfico</span><select value={selectedPeriod} onChange={(event) => setSelectedPeriod(event.target.value)}><option value="2026-2027">2026–2027 · mensal</option><option value="2027-2028">2027–2028 · mensal</option><option value="2028-2029">2028–2029 · mensal</option><option value="2029-2030">2029–2030 · mensal</option></select><ChevronDown size={15} /></label></div><div className="chart-area"><ResponsiveContainer width="100%" height="100%"><BarChart data={visiblePeriodData} margin={{ top: 12, right: 10, left: -20, bottom: 0 }} barGap={7}><CartesianGrid vertical={false} stroke="#e7ecef" /><XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} /><YAxis axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} /><Tooltip cursor={{ fill: '#f4f7f8' }} contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} /><Bar dataKey="cadastrados" name="Cadastrados" fill="#234e70" radius={[4, 4, 0, 0]} barSize={12} /></BarChart></ResponsiveContainer></div><div className="chart-legend"><span><i className="legend-blue" />Itens cadastrados</span><span className="chart-total">Total no período: 3.214</span></div></div><div className="panel category-panel"><div className="panel-header"><div><h2>Por categoria</h2><p>Distribuição do estoque</p></div><button className="more-button" aria-label="Mais opções">•••</button></div><div className="pie-wrap"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieData} cx="50%" cy="48%" innerRadius={55} outerRadius={84} paddingAngle={3} dataKey="value" stroke="none">{pieData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}</Pie><Tooltip contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} /></PieChart></ResponsiveContainer><div className="pie-center"><strong>618</strong><span>itens</span></div></div><div className="category-legend">{pieData.map((entry) => <div key={entry.name}><span><i style={{ backgroundColor: entry.color }} />{entry.name}</span><strong>{entry.value}</strong></div>)}</div></div></div>
+        {activeSection === 'Configurações' ? (
+          <div className="panel p-8 text-center text-slate-600">
+            <Settings2 size={48} className="mx-auto mb-4 text-slate-400" />
+            <h2 className="text-xl font-bold text-slate-800">Configurações do Sistema</h2>
+            <p className="mt-2 text-sm text-slate-500">Esta tela está em desenvolvimento. Em breve você poderá editar perfis, permissões e parâmetros do sistema por aqui.</p>
+          </div>
+        ) : activeSection === 'Visão geral' ? <>
+          <div className="metrics-grid">
+            <MetricCard label="Total de Inservíveis" value={totalInserviveis} detail="itens cadastrados" icon={Box} />
+            <MetricCard label="Aguardando leilão" value={aguardandoLeilaoCount} detail="itens prontos" icon={Gavel} tone="amber" />
+            <MetricCard label="Cadastrados no mês" value={cadastradosNoMesCount} detail="no mês atual" icon={ClipboardList} tone="green" />
+            <MetricCard label="Retirados" value={retiradosCount} detail={`${totalInserviveis > 0 ? ((retiradosCount / totalInserviveis) * 100).toFixed(1) : 0}% do total`} icon={Truck} tone="navy" />
+          </div>
+          <div className="dashboard-grid">
+            <div className="panel large-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Movimentação de inservíveis</h2>
+                  <p>Itens cadastrados por mês</p>
+                </div>
+                <label className="period-select">
+                  <span className="sr-only">Período do gráfico</span>
+                  <select value={selectedPeriod} onChange={(event) => setSelectedPeriod(event.target.value)}>
+                    <option value="2026-2027">2026–2027 · mensal</option>
+                    <option value="2027-2028">2027–2028 · mensal</option>
+                    <option value="2028-2029">2028–2029 · mensal</option>
+                    <option value="2029-2030">2029–2030 · mensal</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </div>
+              <div className="chart-area">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={periodDataDynamic} margin={{ top: 12, right: 10, left: -20, bottom: 0 }} barGap={7}>
+                    <CartesianGrid vertical={false} stroke="#e7ecef" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} />
+                    <Tooltip cursor={{ fill: '#f4f7f8' }} contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />
+                    <Bar dataKey="cadastrados" name="Cadastrados" fill="#234e70" radius={[4, 4, 0, 0]} barSize={12} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="chart-legend">
+                <span><i className="legend-blue" />Itens cadastrados</span>
+                <span className="chart-total">Total no período: {periodDataDynamic.reduce((a, b) => a + b.cadastrados, 0)}</span>
+              </div>
+            </div>
+            
+            <div className="panel category-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Por categoria</h2>
+                  <p>Distribuição do estoque</p>
+                </div>
+              </div>
+              <div className="pie-wrap">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={pieDataDynamic.length > 0 ? pieDataDynamic : [{ name: 'Sem itens', value: 1, color: '#e2e8f0' }]} cx="50%" cy="48%" innerRadius={55} outerRadius={84} paddingAngle={3} dataKey="value" stroke="none">
+                      {pieDataDynamic.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pie-center"><strong>{totalInserviveis}</strong><span>itens</span></div>
+              </div>
+              <div className="category-legend">
+                {pieDataDynamic.map((entry) => (
+                  <div key={entry.name}>
+                    <span><i style={{ backgroundColor: entry.color }} />{entry.name}</span>
+                    <strong>{entry.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
           <div className="section-heading"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema</p></div><button className="text-button" onClick={() => setActiveSection('Inventário')}>Ver inventário completo <span>→</span></button></div>
         </> : <div className="panel inventory-panel"><div className="panel-header"><div><h2>{activeCategory === 'Todos os itens' ? 'Todos os itens' : activeCategory}</h2><p>Consulte, filtre e atualize os materiais cadastrados.</p></div><div className="panel-actions"><button className="secondary-button small" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setDownloadAnchor(null); setFilterAnchor((current) => (current ? null : rect)) }}><Filter size={15} />Filtros{selectedCategories.length > 0 && <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#234e70] px-1 text-[10px] font-semibold text-white">{selectedCategories.length}</span>}</button>
 {filterAnchor && <FloatingPanel anchor={filterAnchor} width={264} label="Filtrar por categoria" onClose={() => setFilterAnchor(null)}>
   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categoria</p>
   <div className="flex flex-col gap-1">
-    {categories.map((category) => <label key={category.label} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"><input type="checkbox" className="h-4 w-4 accent-[#234e70]" checked={selectedCategories.includes(category.label)} onChange={() => setSelectedCategories((current) => (current.includes(category.label) ? current.filter((name) => name !== category.label) : [...current, category.label]))} />{category.label}</label>)}
+    {['Com patrimônio', 'Sem patrimônio', 'Sem garantia', 'Funcionais'].map((catLabel) => <label key={catLabel} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"><input type="checkbox" className="h-4 w-4 accent-[#234e70]" checked={selectedCategories.includes(catLabel)} onChange={() => setSelectedCategories((current) => (current.includes(catLabel) ? current.filter((name) => name !== catLabel) : [...current, catLabel]))} />{catLabel}</label>)}
   </div>
   <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
     <button className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40" disabled={selectedCategories.length === 0} onClick={() => setSelectedCategories([])}>Limpar</button>
@@ -474,12 +599,22 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
       <label>Modelo<input value={form.model} onChange={(event) => update('model', event.target.value)} placeholder="Ex.: Latitude 5420" /></label>
       <label>Patrimônio<input value={form.tag} onChange={(event) => update('tag', event.target.value)} placeholder="Ex.: PAT-004218" /></label>
       <label>Serial number<input value={form.serial} onChange={(event) => update('serial', event.target.value)} placeholder="Informe o serial" /></label>
-      <label>Service tag <span>(opcional)</span><input value={form.serviceTag} onChange={(event) => update('serviceTag', event.target.value)} placeholder="Informe a service tag" /></label>
       <label>Data de cadastro<input type="date" value={form.registeredAt} onChange={(event) => update('registeredAt', event.target.value)} /></label>
     </div>
-    <fieldset><legend>Categorias do inservível</legend><div className="check-grid">{categories.map((category) => <label key={category.label}><input type="checkbox" checked={form.categories.includes(category.label)} onChange={() => toggleCategory(category.label)} />{category.label}</label>)}</div></fieldset>
-    <div className="modal-note"><AlertTriangle size={16} /><span>Itens sem garantia terão o tempo de armazenamento calculado automaticamente a partir da data de cadastro.</span></div>
-    {error && <p className="px-1 text-sm text-red-600">{error}</p>}
-    <div className="modal-footer"><button className="secondary-button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" onClick={submit} disabled={saving}><Check size={16} />{saving ? 'Salvando…' : 'Salvar item'}</button></div>
+    <div className="mt-4">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categorias do item</p>
+      <div className="flex flex-wrap gap-2">
+        {['Com patrimônio', 'Sem patrimônio', 'Sem garantia', 'Funcionais'].map((category) => (
+          <button key={category} type="button" className={`px-3 py-1.5 rounded-md text-xs font-medium border ${form.categories.includes(category) ? 'bg-[#234e70] text-white border-[#234e70]' : 'bg-slate-50 text-slate-700 border-slate-200'}`} onClick={() => toggleCategory(category)}>
+            {category}
+          </button>
+        ))}
+      </div>
+    </div>
+    {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+    <div className="modal-foot">
+      <button className="secondary-button" onClick={onClose}>Cancelar</button>
+      <button className="primary-button" disabled={saving} onClick={submit}>{saving ? 'Salvando...' : 'Cadastrar item'}</button>
+    </div>
   </div></div>
 }
