@@ -31,6 +31,7 @@ import {
 import { signOut } from 'firebase/auth'
 import {
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
@@ -326,7 +327,15 @@ export default function InventoryDashboard() {
 
   // --- CÁLCULOS DAS MÉTRICAS DO TOPO ---
   const totalInserviveis = items.length
-  const aguardandoLeilaoCount = useMemo(() => {return items.filter((item) => item.categories.includes('Sem garantia')).length}, [items])
+  const aguardandoLeilaoCount = useMemo(() => {return items.filter((item) => item.categories.includes('Sem garantia') && !item.auction).length}, [items])
+  const deleteItem = async (docId: string, itemId: string) => {
+    try {
+      await deleteDoc(doc(db, 'inserviveis', docId))
+      notify(`Item ${itemId} excluído com sucesso`)
+    } catch {
+      notify('Não foi possível excluir o item')
+    }
+  }
   const retiradosCount = useMemo(() => {return items.filter((item) => item.auction).length}, [items])
   
   const cadastradosNoMesCount = useMemo(() => {
@@ -538,9 +547,9 @@ export default function InventoryDashboard() {
     <button className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40" disabled={selectedCategories.length === 0} onClick={() => setSelectedCategories([])}>Limpar</button>
     <button className="primary-button small" onClick={() => setFilterAnchor(null)}>Concluir</button>
   </div>
-</FloatingPanel>}<button className="primary-button small" onClick={() => setShowNew(true)}><Plus size={15} />Novo item</button></div></div><InventoryTable items={filteredItems} onNotify={notify} onAuctionChange={setAuction} /></div>}
+</FloatingPanel>}<button className="primary-button small" onClick={() => setShowNew(true)}><Plus size={15} />Novo item</button></div></div><InventoryTable items={filteredItems} onNotify={notify} onAuctionChange={setAuction} onDeleteItem={deleteItem} /></div>}
 
-        {activeSection === 'Visão geral' && <div className="panel inventory-panel"><div className="panel-header"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema.</p></div><div className="panel-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item, serial ou patrimônio" /></div><button className="secondary-button small" onClick={() => setActiveSection('Inventário')}>Ver todos <ArrowDownToLine size={15} /></button></div></div><InventoryTable items={filteredItems.slice(0, 4)} onNotify={notify} onAuctionChange={setAuction} /></div>}
+        {activeSection === 'Visão geral' && <div className="panel inventory-panel"><div className="panel-header"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema.</p></div><div className="panel-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item, serial ou patrimônio" /></div><button className="secondary-button small" onClick={() => setActiveSection('Inventário')}>Ver todos <ArrowDownToLine size={15} /></button></div></div><InventoryTable items={filteredItems.slice(0, 4)} onNotify={notify} onAuctionChange={setAuction} onDeleteItem={deleteItem} /></div>}
       </div>
     </main>
     {showNew && <NewItemModal onClose={() => setShowNew(false)} onSave={async (data) => { await createItem(data); setShowNew(false); notify('Item cadastrado com sucesso') }} />}
@@ -548,15 +557,135 @@ export default function InventoryDashboard() {
   </div>
 }
 
-function InventoryTable({ items: rows, onNotify, onAuctionChange }: { items: Item[]; onNotify: (message: string) => void; onAuctionChange: (id: string, value: boolean) => void | Promise<void> }) {
-  const [menu, setMenu] = useState<{ id: string; rect: DOMRect } | null>(null)
+function InventoryTable({ 
+  items: rows, 
+  onNotify, 
+  onAuctionChange, 
+  onDeleteItem 
+}: { 
+  items: Item[]; 
+  onNotify: (message: string) => void; 
+  onAuctionChange: (id: string, value: boolean) => void | Promise<void>; 
+  onDeleteItem?: (docId: string, id: string) => void | Promise<void>;
+}) {
+  const [menu, setMenu] = useState<{ id: string; docId: string; rect: DOMRect; confirming?: boolean } | null>(null)
 
-  return <div className="table-scroll"><table className="inventory-table"><thead><tr><th>ITEM</th><th>IDENTIFICAÇÃO</th><th>CADASTRO</th><th>CATEGORIAS</th><th>STATUS</th><th>LEILOADO</th><th /></tr></thead><tbody>{rows.map((item) => { const isAuctioned = item.auction; return <tr key={item.id}><td><div className="item-cell"><div className="item-thumb"><Box size={17} /></div><div><strong>{item.item}</strong><small>{item.id} · {item.type}</small></div></div></td><td><span className="mono">{item.serial}</span><small className="table-sub">{item.tag}</small></td><td><span>{item.date}</span><small className="table-sub">{item.age === 'hoje' ? 'Cadastrado hoje' : `Há ${item.age}`}</small></td><td><div className="tag-list">{item.categories.slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}</div></td><td><span className={`status-badge ${item.status === 'Retirado' ? 'retired' : ''}`}><i />{item.status}</span></td><td>{isAuctioned ? <span className="auction-yes"><Gavel size={13} />Sim</span> : <span className="auction-no">Não</span>}</td><td><button className="row-menu" data-popover-trigger aria-haspopup="dialog" aria-label={`Marcar ${item.id} como leiloado`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu((current) => (current?.id === item.id ? null : { id: item.id, rect })) }}>•••</button></td></tr> })}</tbody></table>{rows.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">Nenhum item cadastrado ainda. Use o botão “Novo item” para começar.</p>}{menu && <FloatingPanel anchor={menu.rect} width={188} label={`Marcar ${menu.id} como leiloado`} onClose={() => setMenu(null)}>
-  <p className="mb-2 text-sm font-medium text-slate-800">O item {menu.id} foi leiloado?</p>
-  <div className="flex gap-2">
-    {([['Sim', true], ['Não', false]] as const).map(([label, value]) => <button key={label} className={`${(rows.find((row) => row.id === menu.id)?.auction ?? false) === value ? 'primary-button' : 'secondary-button'} small flex-1 justify-center`} onClick={() => { onAuctionChange(menu.id, value); onNotify(`${menu.id}: leiloado marcado como ${label}`); setMenu(null) }}>{label}</button>)}
-  </div>
-</FloatingPanel>}</div>
+  return (
+    <div className="table-scroll">
+      <table className="inventory-table">
+        <thead>
+          <tr>
+            <th>ITEM</th>
+            <th>IDENTIFICAÇÃO</th>
+            <th>CADASTRO</th>
+            <th>CATEGORIAS</th>
+            <th>STATUS</th>
+            <th>LEILOADO</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((item) => { 
+            const isAuctioned = item.auction; 
+            return (
+              <tr key={item.id}>
+                <td>
+                  <div className="item-cell">
+                    <div className="item-thumb"><Box size={17} /></div>
+                    <div><strong>{item.item}</strong><small>{item.id} · {item.type}</small></div>
+                  </div>
+                </td>
+                <td><span className="mono">{item.serial}</span><small className="table-sub">{item.tag}</small></td>
+                <td><span>{item.date}</span><small className="table-sub">{item.age === 'hoje' ? 'Cadastrado hoje' : `Há ${item.age}`}</small></td>
+                <td>
+                  <div className="tag-list">
+                    {item.categories.slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}
+                  </div>
+                </td>
+                <td><span className={`status-badge ${item.status === 'Retirado' ? 'retired' : ''}`}><i />{item.status}</span></td>
+                <td>{isAuctioned ? <span className="auction-yes"><Gavel size={13} />Sim</span> : <span className="auction-no">Não</span>}</td>
+                <td>
+                  <button 
+                    className="row-menu" 
+                    data-popover-trigger 
+                    aria-haspopup="dialog" 
+                    aria-label={`Opções do item ${item.id}`} 
+                    onClick={(event) => { 
+                      const rect = event.currentTarget.getBoundingClientRect(); 
+                      setMenu((current) => (current?.id === item.id ? null : { id: item.id, docId: item.docId, rect })) 
+                    }}
+                  >
+                    •••
+                  </button>
+                </td>
+              </tr> 
+            );
+          })}
+        </tbody>
+      </table>
+
+      {rows.length === 0 && (
+        <p className="px-4 py-8 text-center text-sm text-slate-500">Nenhum item cadastrado ainda. Use o botão “Novo item” para começar.</p>
+      )}
+
+      {menu && (
+        <FloatingPanel anchor={menu.rect} width={210} label={`Ações do item ${menu.id}`} onClose={() => setMenu(null)}>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">ITEM {menu.id}</p>
+          <p className="mb-2 text-xs font-medium text-slate-700">Foi leiloado?</p>
+          <div className="mb-3 flex gap-2">
+            {([['Sim', true], ['Não', false]] as const).map(([label, value]) => (
+              <button 
+                key={label} 
+                className={`${(rows.find((row) => row.id === menu.id)?.auction ?? false) === value ? 'primary-button' : 'secondary-button'} small flex-1 justify-center`} 
+                onClick={() => { 
+                  onAuctionChange(menu.id, value); 
+                  onNotify(`${menu.id}: leiloado marcado como ${label}`); 
+                  setMenu(null);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {onDeleteItem && (
+            <div className="border-t border-slate-100 pt-2">
+              {menu.confirming ? (
+                <>
+                  <p className="mb-2 text-xs text-slate-600">Excluir {menu.id}? Essa ação não pode ser desfeita.</p>
+                  <div className="flex gap-2">
+                    <button
+                      className="secondary-button small flex-1 justify-center"
+                      onClick={() => setMenu((current) => (current ? { ...current, confirming: false } : current))}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      className="flex-1 rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700"
+                      onClick={() => {
+                        const { docId, id } = menu
+                        setMenu(null)
+                        void onDeleteItem(docId, id)
+                      }}
+                    >
+                      Excluir
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                  onClick={() => setMenu((current) => (current ? { ...current, confirming: true } : current))}
+                >
+                  Excluir item
+                </button>
+              )}
+            </div>
+          )}
+        </FloatingPanel>
+      )}
+    </div>
+  )
 }
 
 function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data: NewItemData) => Promise<void> }) {
