@@ -570,8 +570,12 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
     registeredAt: new Date().toLocaleDateString('en-CA'),
     categories: ['Sem garantia'],
   })
+  const [customType, setCustomType] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Lista de tipos incluindo a opção "Outro"
+  const itemTypesWithOptions = [...itemTypes, 'Outro']
 
   const update = (field: keyof Omit<NewItemData, 'categories'>, value: string) => setForm((current) => ({ ...current, [field]: value }))
   const toggleCategory = (label: string) => setForm((current) => ({
@@ -580,41 +584,114 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
   }))
 
   const submit = async () => {
-    if (!form.name.trim() || !form.type) { setError('Informe o nome e o tipo do item.'); return }
+    // Define o tipo final: se for 'Outro', utiliza o valor digitado no campo personalizado
+    const finalType = form.type === 'Outro' ? customType.trim() : form.type
+
+    if (!form.name.trim() || !finalType) { 
+      setError('Informe o nome e o tipo do item.'); 
+      return 
+    }
+
     setSaving(true)
     setError('')
     try {
-      await onSave(form)
+      await onSave({
+        ...form,
+        type: finalType
+      })
     } catch {
       setError('Não foi possível salvar o item. Tente novamente.')
       setSaving(false)
     }
   }
 
-  return <div className="modal-backdrop"><div className="modal-card">
-    <div className="modal-head"><div><p className="eyebrow">NOVO REGISTRO</p><h2>Cadastrar inservível</h2><p>Informe os dados para adicionar um material ao estoque.</p></div><button className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button></div>
-    <div className="form-grid">
-      <label>Nome do item<input value={form.name} onChange={(event) => update('name', event.target.value)} placeholder="Ex.: Notebook Dell Latitude" /></label>
-      <label>Tipo de item<select value={form.type} onChange={(event) => update('type', event.target.value)}><option value="" disabled>Selecione</option>{itemTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
-      <label>Modelo<input value={form.model} onChange={(event) => update('model', event.target.value)} placeholder="Ex.: Latitude 5420" /></label>
-      <label>Patrimônio<input value={form.tag} onChange={(event) => update('tag', event.target.value)} placeholder="Ex.: PAT-004218" /></label>
-      <label>Serial number<input value={form.serial} onChange={(event) => update('serial', event.target.value)} placeholder="Informe o serial" /></label>
-      <label>Data de cadastro<input type="date" value={form.registeredAt} onChange={(event) => update('registeredAt', event.target.value)} /></label>
-    </div>
-    <div className="mt-4">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categorias do item</p>
-      <div className="flex flex-wrap gap-2">
-        {['Com patrimônio', 'Sem patrimônio', 'Sem garantia', 'Funcionais'].map((category) => (
-          <button key={category} type="button" className={`px-3 py-1.5 rounded-md text-xs font-medium border ${form.categories.includes(category) ? 'bg-[#234e70] text-white border-[#234e70]' : 'bg-slate-50 text-slate-700 border-slate-200'}`} onClick={() => toggleCategory(category)}>
-            {category}
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card">
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">NOVO REGISTRO</p>
+            <h2>Cadastrar inservível</h2>
+            <p>Informe os dados para adicionar um material ao estoque.</p>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button>
+        </div>
+
+        <div className="form-grid">
+          <label>
+            Nome do item
+            <input value={form.name} onChange={(event) => update('name', event.target.value)} placeholder="Ex.: Notebook Dell Latitude" />
+          </label>
+
+          <label>
+            Tipo de item
+            <select value={form.type} onChange={(event) => update('type', event.target.value)}>
+              <option value="" disabled>Selecione</option>
+              {itemTypesWithOptions.map((type) => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* Campo de texto extra exibido apenas se selecionar "Outro" */}
+          {form.type === 'Outro' && (
+            <label className="col-span-2">
+              Especifique o tipo de item
+              <input 
+                value={customType} 
+                onChange={(event) => setCustomType(event.target.value)} 
+                placeholder="Digite o tipo de item (Ex.: Hub Switch, Nobreak, etc.)" 
+                autoFocus
+              />
+            </label>
+          )}
+
+          <label>
+            Modelo
+            <input value={form.model} onChange={(event) => update('model', event.target.value)} placeholder="Ex.: Latitude 5420" />
+          </label>
+
+          <label>
+            Patrimônio
+            <input value={form.tag} onChange={(event) => update('tag', event.target.value)} placeholder="Ex.: PAT-004218" />
+          </label>
+
+          <label>
+            Serial number
+            <input value={form.serial} onChange={(event) => update('serial', event.target.value)} placeholder="Informe o serial" />
+          </label>
+
+          <label>
+            Data de cadastro
+            <input type="date" value={form.registeredAt} onChange={(event) => update('registeredAt', event.target.value)} />
+          </label>
+        </div>
+
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categorias do item</p>
+          <div className="flex flex-wrap gap-2">
+            {['Com patrimônio', 'Sem patrimônio', 'Sem garantia', 'Funcionais'].map((category) => (
+              <button 
+                key={category} 
+                type="button" 
+                className={`px-3 py-1.5 rounded-md text-xs font-medium border ${form.categories.includes(category) ? 'bg-[#234e70] text-white border-[#234e70]' : 'bg-slate-50 text-slate-700 border-slate-200'}`} 
+                onClick={() => toggleCategory(category)}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+
+        <div className="modal-foot">
+          <button className="secondary-button" onClick={onClose}>Cancelar</button>
+          <button className="primary-button" disabled={saving} onClick={submit}>
+            {saving ? 'Salvando...' : 'Cadastrar item'}
           </button>
-        ))}
+        </div>
       </div>
     </div>
-    {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
-    <div className="modal-foot">
-      <button className="secondary-button" onClick={onClose}>Cancelar</button>
-      <button className="primary-button" disabled={saving} onClick={submit}>{saving ? 'Salvando...' : 'Cadastrar item'}</button>
-    </div>
-  </div></div>
+  )
 }
