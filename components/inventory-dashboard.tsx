@@ -326,15 +326,15 @@ export default function InventoryDashboard() {
 
   // --- CÁLCULOS DAS MÉTRICAS DO TOPO ---
   const totalInserviveis = items.length
-  const aguardandoLeilaoCount = useMemo(() => items.filter(i => i.auction).length, [items])
-  const retiradosCount = useMemo(() => items.filter(i => i.status === 'Retirado').length, [items])
+  const aguardandoLeilaoCount = useMemo(() => {return items.filter((item) => item.categories.includes('Sem garantia')).length}, [items])
+  const retiradosCount = useMemo(() => {return items.filter((item) => item.auction).length}, [items])
   
   const cadastradosNoMesCount = useMemo(() => {
     const now = new Date()
     const currentYear = now.getFullYear()
     const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
     const prefix = `${currentYear}-${currentMonth}`
-    return items.filter(i => i.rawRegisteredAt && i.rawRegisteredAt.startsWith(prefix)).length
+    return items.filter((i) => i.rawRegisteredAt && i.rawRegisteredAt.startsWith(prefix)).length
   }, [items])
 
   // --- GRÁFICO DINÂMICO POR TIPO DE ITEM ---
@@ -459,11 +459,11 @@ export default function InventoryDashboard() {
           </div>
         ) : activeSection === 'Visão geral' ? <>
           <div className="metrics-grid">
-            <MetricCard label="Total de Inservíveis" value={totalInserviveis} detail="itens cadastrados" icon={Box} />
-            <MetricCard label="Aguardando leilão" value={aguardandoLeilaoCount} detail="itens prontos" icon={Gavel} tone="amber" />
-            <MetricCard label="Cadastrados no mês" value={cadastradosNoMesCount} detail="no mês atual" icon={ClipboardList} tone="green" />
-            <MetricCard label="Retirados" value={retiradosCount} detail={`${totalInserviveis > 0 ? ((retiradosCount / totalInserviveis) * 100).toFixed(1) : 0}% do total`} icon={Truck} tone="navy" />
-          </div>
+  <MetricCard label="Total de Inservíveis" value={totalInserviveis} detail="itens cadastrados" icon={Box} />
+  <MetricCard label="Aguardando leilão" value={aguardandoLeilaoCount} detail="itens sem garantia" icon={Gavel} tone="amber" />
+  <MetricCard label="Cadastrados no mês" value={cadastradosNoMesCount} detail="no mês atual" icon={ClipboardList} tone="green" />
+  <MetricCard label="Retirados / Leiloados" value={retiradosCount} detail={`${totalInserviveis > 0 ? ((retiradosCount / totalInserviveis) * 100).toFixed(1) : 0}% do total`} icon={Truck} tone="navy" />
+</div>
           <div className="dashboard-grid">
             <div className="panel large-panel">
               <div className="panel-header">
