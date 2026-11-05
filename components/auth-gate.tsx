@@ -33,8 +33,8 @@ function LoginForm() {
         <div className="mb-5 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#234e70] text-white"><Box size={21} /></div>
           <div>
-            <strong className="block text-slate-900">Inservíveis</strong>
-            <small className="text-slate-500">Gestão de inservíveis</small>
+            <strong className="block text-slate-900">Gestão de Ativos</strong>
+            <small className="text-slate-500">Inservíveis e estoque</small>
           </div>
         </div>
         <label className="mb-3 block text-sm font-medium text-slate-700">

@@ -12,7 +12,9 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronRight,
   CircleHelp,
+  Clock,
   ClipboardList,
   FileDown,
   Filter,
@@ -91,18 +93,25 @@ type NewItemData = {
 
 const itemTypes = ['Monitores', 'Teclados', 'Mouses', 'Dockstations', 'APs', 'Telefones', 'Placas de circuito', 'Placas de vídeo', 'Baterias', 'Memória RAM', 'HDs', 'Fontes', 'Extensões de tomada', 'Webcams', 'Impressoras', 'Leitores de DVD']
 
-const PIE_COLORS = ['#234e70', '#4f8a81', '#c98235', '#728c45', '#687786', '#a259ff', '#f24e1e', '#0acf83']
+const PIE_COLORS = ['#4a7fa7', '#3f8f8b', '#7fa87f', '#d9a95f', '#d38a7e', '#9a8cc4', '#7c8da0', '#b5b86a']
 
 const GROUPS: Group[] = ['Inservíveis', 'Estoque']
 
-// As antigas "categorias" agora são subcategorias de Inservíveis.
-const SUBCATEGORIES = [
-  { label: 'Com patrimônio', icon: Tag, color: 'bg-[#234e70]' },
-  { label: 'Sem patrimônio', icon: Box, color: 'bg-[#4f8a81]' },
-  { label: 'Sem garantia', icon: ShieldAlert, color: 'bg-[#c98235]' },
-  { label: 'Funcionais', icon: PackageCheck, color: 'bg-[#728c45]' },
-]
-const SUBCATEGORY_LABELS = SUBCATEGORIES.map((sub) => sub.label)
+// Subcategorias de cada categoria (os nomes "Com patrimônio" e "Sem patrimônio" existem nas duas).
+const SUBCATEGORIES: Record<Group, { label: string; icon: typeof Tag; color: string }[]> = {
+  'Inservíveis': [
+    { label: 'Com patrimônio', icon: Tag, color: 'bg-[#4a7fa7]' },
+    { label: 'Sem patrimônio', icon: Box, color: 'bg-[#7fa87f]' },
+    { label: 'Sem garantia', icon: ShieldAlert, color: 'bg-[#d9a95f]' },
+    { label: 'Funcionais', icon: PackageCheck, color: 'bg-[#3f8f8b]' },
+  ],
+  'Estoque': [
+    { label: 'Com patrimônio', icon: Tag, color: 'bg-[#4a7fa7]' },
+    { label: 'Pendente patrimoniar', icon: Clock, color: 'bg-[#d9a95f]' },
+    { label: 'Sem patrimônio', icon: Box, color: 'bg-[#7fa87f]' },
+  ],
+}
+const DEFAULT_SUBCATEGORY: Record<Group, string> = { 'Inservíveis': 'Sem garantia', 'Estoque': 'Com patrimônio' }
 
 function formatDate(isoDate?: string) {
   if (!isoDate) return ''
@@ -160,7 +169,7 @@ async function createItem(data: NewItemData) {
       registeredAt: data.registeredAt,
       status: 'Armazenado',
       group: data.group,
-      categories: isStock ? [] : data.categories,
+      categories: data.categories,
       auction: false,
       discarded: false,
       createdAt: serverTimestamp(),
@@ -169,7 +178,7 @@ async function createItem(data: NewItemData) {
 }
 
 function MetricCard({ label, value, detail, icon: Icon, tone = 'blue' }: { label: string; value: string | number; detail: string; icon: typeof Box; tone?: string }) {
-  const tones: Record<string, string> = { blue: 'bg-[#eaf2f8] text-[#234e70]', green: 'bg-[#edf5ed] text-[#567341]', amber: 'bg-[#fff3e3] text-[#b46c1c]', navy: 'bg-[#eef1f3] text-[#3d5061]', red: 'bg-[#fdecec] text-[#b3382f]' }
+  const tones: Record<string, string> = { blue: 'bg-[#e6f0f7] text-[#3b6f94]', green: 'bg-[#e8f3ee] text-[#3f7d63]', amber: 'bg-[#fbf1de] text-[#a9741f]', navy: 'bg-[#eaeff2] text-[#4b6070]', red: 'bg-[#fbebe8] text-[#b5604f]' }
   return <div className="metric-card"><div className={`metric-icon ${tones[tone]}`}><Icon size={19} strokeWidth={1.8} /></div><div className="min-w-0"><p className="metric-label">{label}</p><p className="metric-value">{value}</p><p className="metric-detail">{detail}</p></div></div>
 }
 
@@ -231,9 +240,9 @@ function exportCsv(rows: ReportRow[], filename: string) {
 async function exportXlsx(rows: ReportRow[], filename: string) {
   const ExcelJS = (await import('exceljs')).default
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet('Inservíveis')
+  const sheet = workbook.addWorksheet('Ativos')
   sheet.addTable({
-    name: 'Inserviveis',
+    name: 'Ativos',
     ref: 'A1',
     headerRow: true,
     totalsRow: false,
@@ -258,7 +267,7 @@ async function exportPdf(rows: ReportRow[], filename: string, filterLabel: strin
 
   doc.setFontSize(16)
   doc.setTextColor(35, 78, 112)
-  doc.text('Relatório de inservíveis', 40, 44)
+  doc.text('Relatório de ativos', 40, 44)
   doc.setFontSize(9)
   doc.setTextColor(104, 119, 134)
   doc.text(`Gerado em ${new Date().toLocaleDateString('pt-BR')} · ${rows.length} ${rows.length === 1 ? 'item' : 'itens'} · ${filterLabel}`, 40, 62)
@@ -366,11 +375,11 @@ function MovementPanel({ title, data, period, onPeriodChange, color }: { title: 
       <div className="chart-area">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 12, right: 10, left: -20, bottom: 0 }} barGap={7}>
-            <CartesianGrid vertical={false} stroke="#e7ecef" />
-            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} allowDecimals={false} />
+            <CartesianGrid vertical={false} stroke="#dde5ea" />
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#5f7080', fontSize: 12 }} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#5f7080', fontSize: 12 }} allowDecimals={false} />
             <Tooltip cursor={{ fill: '#f4f7f8' }} contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />
-            <Bar dataKey="cadastrados" name="Cadastrados" fill={color} radius={[4, 4, 0, 0]} barSize={12} />
+            <Bar dataKey="cadastrados" name="Cadastrados" fill={color} radius={[4, 4, 0, 0]} barSize={16} background={{ fill: '#eef3f6' }} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -383,7 +392,7 @@ function MovementPanel({ title, data, period, onPeriodChange, color }: { title: 
 }
 
 function DistributionPanel({ title, subtitle, data, total }: { title: string; subtitle: string; data: { name: string; value: number; color: string }[]; total: number }) {
-  const chartData = data.length > 0 ? data : [{ name: 'Sem itens', value: 1, color: '#e2e8f0' }]
+  const chartData = data.length > 0 ? data : [{ name: 'Sem itens', value: 1, color: '#e3eaee' }]
   return (
     <div className="panel category-panel">
       <div className="panel-header">
@@ -395,7 +404,7 @@ function DistributionPanel({ title, subtitle, data, total }: { title: string; su
       <div className="pie-wrap">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={chartData} cx="50%" cy="48%" innerRadius={55} outerRadius={84} paddingAngle={3} dataKey="value" stroke="none">
+            <Pie data={chartData} cx="50%" cy="48%" innerRadius={52} outerRadius={88} paddingAngle={2} dataKey="value" stroke="#ffffff" strokeWidth={2}>
               {chartData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
             </Pie>
             {data.length > 0 && <Tooltip contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />}
@@ -418,8 +427,9 @@ function DistributionPanel({ title, subtitle, data, total }: { title: string; su
 export default function InventoryDashboard() {
   const [activeSection, setActiveSection] = useState('Visão geral')
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<Record<Group, boolean>>({ 'Inservíveis': false, 'Estoque': false })
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
-  const activeCategory = selectedCategories.length === 1 ? selectedCategories[0] : selectedCategories.length > 1 ? `${selectedCategories.length} subcategorias` : selectedGroup ?? 'Todos os itens'
+  const activeCategory = selectedCategories.length === 1 ? `${selectedGroup ? `${selectedGroup} · ` : ''}${selectedCategories[0]}` : selectedCategories.length > 1 ? `${selectedCategories.length} subcategorias` : selectedGroup ?? 'Todos os itens'
   const [filterAnchor, setFilterAnchor] = useState<DOMRect | null>(null)
   const [downloadAnchor, setDownloadAnchor] = useState<DOMRect | null>(null)
   const [query, setQuery] = useState('')
@@ -445,9 +455,16 @@ export default function InventoryDashboard() {
   const estoqueItems = useMemo(() => activeItems.filter((item) => item.group === 'Estoque'), [activeItems])
 
   // --- SUBCATEGORIAS DE INSERVÍVEIS (CONTAGEM PARA A SIDEBAR) ---
-  const dynamicSubcategories = useMemo(
-    () => SUBCATEGORIES.map((sub) => ({ ...sub, count: inserviveisItems.filter((item) => item.categories.includes(sub.label)).length })),
-    [inserviveisItems],
+  const subcategoryTree = useMemo(
+    () => GROUPS.map((group) => {
+      const groupItems = group === 'Estoque' ? estoqueItems : inserviveisItems
+      return {
+        group,
+        total: groupItems.length,
+        subs: SUBCATEGORIES[group].map((sub) => ({ ...sub, count: groupItems.filter((item) => item.categories.includes(sub.label)).length })),
+      }
+    }),
+    [inserviveisItems, estoqueItems],
   )
 
   // --- CÁLCULOS DAS MÉTRICAS DO TOPO ---
@@ -514,7 +531,7 @@ export default function InventoryDashboard() {
     if (!kind) { notify(`Relatório ${format.toUpperCase()} preparado para download`); return }
     if (filteredItems.length === 0) { notify('Nenhum item para exportar com os filtros atuais'); return }
     const rows = buildReportRows(filteredItems)
-    const filename = `relatorio-inserviveis-${new Date().toLocaleDateString('en-CA')}`
+    const filename = `relatorio-ativos-${new Date().toLocaleDateString('en-CA')}`
     const filterLabel = [
       selectedGroup ? `Categoria: ${selectedGroup}` : 'Todas as categorias',
       selectedCategories.length > 0 ? `Subcategorias: ${selectedCategories.join(', ')}` : '',
@@ -532,21 +549,45 @@ export default function InventoryDashboard() {
 
   return <div className="app-shell">
     <aside className={`sidebar ${showMobileNav ? 'sidebar-open' : ''}`}>
-      <div className="brand"><div className="brand-mark"><Box size={21} /></div><div><strong>Inservíveis</strong><small>Gestão de inservíveis</small></div><button className="mobile-close" onClick={() => setShowMobileNav(false)} aria-label="Fechar menu"><X size={18} /></button></div>
+      <div className="brand"><div className="brand-mark"><Box size={21} /></div><div><strong>Gestão de Ativos</strong><small>Inservíveis e estoque</small></div><button className="mobile-close" onClick={() => setShowMobileNav(false)} aria-label="Fechar menu"><X size={18} /></button></div>
       <nav className="main-nav" aria-label="Navegação principal">
         <p className="nav-caption">GESTÃO</p>
         {[['Visão geral', LayoutDashboard], ['Inventário', ClipboardList]].map(([label, Icon]) => <button key={label as string} className={`nav-link ${activeSection === label ? 'active' : ''}`} onClick={() => { setActiveSection(label as string); setShowMobileNav(false) }}><Icon size={18} />{label as string}</button>)}
         <p className="nav-caption nav-caption-spaced">CATEGORIAS</p>
-        {GROUPS.map((group) => {
+        {subcategoryTree.map(({ group, total, subs }) => {
           const GroupIcon = group === 'Estoque' ? Archive : Box
-          const groupCount = group === 'Estoque' ? totalEstoque : totalInserviveis
           const groupSelected = selectedGroup === group && selectedCategories.length === 0
+          const open = expandedGroups[group]
           return (
             <div key={group}>
-              <button className={`category-link ${groupSelected ? 'selected' : ''}`} onClick={() => { setSelectedGroup(groupSelected ? null : group); setSelectedCategories([]); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${group === 'Estoque' ? 'bg-[#4f8a81]' : 'bg-[#234e70]'}`}><GroupIcon size={13} /></span>{group}<span className="category-count">{groupCount}</span></button>
-              {group === 'Inservíveis' && (
-                <div className="ml-4 border-l border-slate-200 pl-2">
-                  {dynamicSubcategories.map(({ label, count, icon: Icon, color }) => <button key={label} className={`category-link ${selectedCategories.includes(label) ? 'selected' : ''}`} onClick={() => { setSelectedGroup('Inservíveis'); setSelectedCategories((current) => (current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span></button>)}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="flex h-7 w-6 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
+                  onClick={() => setExpandedGroups((current) => ({ ...current, [group]: !current[group] }))}
+                  aria-expanded={open}
+                  aria-label={`${open ? 'Recolher' : 'Expandir'} ${group}`}
+                >
+                  <ChevronRight size={15} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+                </button>
+                <button
+                  className={`category-link min-w-0 flex-1 ${groupSelected ? 'selected' : ''}`}
+                  onClick={() => { setSelectedGroup(groupSelected ? null : group); setSelectedCategories([]); setExpandedGroups((current) => ({ ...current, [group]: true })); setActiveSection('Inventário'); setShowMobileNav(false) }}
+                >
+                  <span className={`category-dot ${group === 'Estoque' ? 'bg-[#3f8f8b]' : 'bg-[#4a7fa7]'}`}><GroupIcon size={13} /></span>{group}<span className="category-count">{total}</span>
+                </button>
+              </div>
+              {open && (
+                <div className="ml-7 border-l border-slate-200 pl-2">
+                  {subs.map(({ label, count, icon: Icon, color }) => (
+                    <button
+                      key={label}
+                      className={`category-link ${selectedGroup === group && selectedCategories.includes(label) ? 'selected' : ''}`}
+                      onClick={() => { setSelectedGroup(group); setSelectedCategories((current) => (selectedGroup === group && current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}
+                    >
+                      <span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -563,7 +604,7 @@ export default function InventoryDashboard() {
     </aside>
 
     <main className="main-content">
-      <header className="topbar"><button className="mobile-menu" onClick={() => setShowMobileNav(true)} aria-label="Abrir menu"><Menu size={21} /></button><div className="breadcrumbs"><span>Inservíveis</span><span>/</span><strong>{activeSection}</strong>{activeCategory !== 'Todos os itens' && <><span>/</span><strong>{activeCategory}</strong></>}</div><div className="top-actions"><button className="icon-button" aria-label="Ajuda"><CircleHelp size={19} /></button><button className="icon-button notification" aria-label="Notificações"><Bell size={19} /><i /></button><div className="top-avatar">JS</div></div></header>
+      <header className="topbar"><button className="mobile-menu" onClick={() => setShowMobileNav(true)} aria-label="Abrir menu"><Menu size={21} /></button><div className="breadcrumbs"><span>Gestão de Ativos</span><span>/</span><strong>{activeSection}</strong>{activeCategory !== 'Todos os itens' && <><span>/</span><strong>{activeCategory}</strong></>}</div><div className="top-actions"><button className="icon-button" aria-label="Ajuda"><CircleHelp size={19} /></button><button className="icon-button notification" aria-label="Notificações"><Bell size={19} /><i /></button><div className="top-avatar">JS</div></div></header>
       <div className="content-wrap">
         <div className="page-heading"><div><p className="eyebrow">CENTRAL DE OPERAÇÕES</p><h1>{activeSection}</h1><p className="page-description">Acompanhe o ciclo dos materiais inservíveis e prepare seus próximos leilões.</p></div><div className="heading-actions"><button className="secondary-button" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterAnchor(null); setDownloadAnchor((current) => (current ? null : rect)) }}><FileDown size={16} />Exportar relatório<ChevronDown size={15} /></button>{downloadAnchor && <FloatingPanel anchor={downloadAnchor} width={248} label="Exportar relatório" onClose={() => setDownloadAnchor(null)}>
   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Exportar relatório</p>
@@ -588,20 +629,28 @@ export default function InventoryDashboard() {
             <MetricCard label="Descartados" value={descartadosCount} detail={descartadosCount === 1 ? 'item descartado' : 'itens descartados'} icon={Trash2} tone="red" />
           </div>
           <div className="dashboard-grid">
-            <MovementPanel title="Movimentação de inservíveis" data={periodInserviveis} period={selectedPeriod} onPeriodChange={setSelectedPeriod} color="#234e70" />
+            <MovementPanel title="Movimentação de inservíveis" data={periodInserviveis} period={selectedPeriod} onPeriodChange={setSelectedPeriod} color="#4a7fa7" />
             <DistributionPanel title="Por categoria" subtitle="Distribuição por inservíveis" data={pieInserviveis} total={totalInserviveis} />
           </div>
           <div className="dashboard-grid">
-            <MovementPanel title="Movimentação de estoque" data={periodEstoque} period={stockPeriod} onPeriodChange={setStockPeriod} color="#4f8a81" />
+            <MovementPanel title="Movimentação de estoque" data={periodEstoque} period={stockPeriod} onPeriodChange={setStockPeriod} color="#3f8f8b" />
             <DistributionPanel title="Por categoria" subtitle="Distribuição por estoque" data={pieEstoque} total={totalEstoque} />
           </div>
           <div className="section-heading"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema</p></div><button className="text-button" onClick={() => setActiveSection('Inventário')}>Ver inventário completo <span>→</span></button></div>
-        </> : <div className="panel inventory-panel"><div className="panel-header"><div><h2>{activeCategory === 'Todos os itens' ? 'Todos os itens' : activeCategory}</h2><p>Consulte, filtre e atualize os materiais cadastrados.</p></div><div className="panel-actions"><button className="secondary-button small" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setDownloadAnchor(null); setFilterAnchor((current) => (current ? null : rect)) }}><Filter size={15} />Filtros{(selectedCategories.length > 0 || selectedGroup !== null) && <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#234e70] px-1 text-[10px] font-semibold text-white">{selectedCategories.length > 0 ? selectedCategories.length : 1}</span>}</button>
+        </> : <div className="panel inventory-panel"><div className="panel-header"><div><h2>{activeCategory === 'Todos os itens' ? 'Todos os itens' : activeCategory}</h2><p>Consulte, filtre e atualize os materiais cadastrados.</p></div><div className="panel-actions"><button className="secondary-button small" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setDownloadAnchor(null); setFilterAnchor((current) => (current ? null : rect)) }}><Filter size={15} />Filtros{(selectedCategories.length > 0 || selectedGroup !== null) && <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#4a7fa7] px-1 text-[10px] font-semibold text-white">{selectedCategories.length > 0 ? selectedCategories.length : 1}</span>}</button>
 {filterAnchor && <FloatingPanel anchor={filterAnchor} width={264} label="Filtrar por categoria" onClose={() => setFilterAnchor(null)}>
-  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Subcategorias de Inservíveis</p>
-  <div className="flex flex-col gap-1">
-    {SUBCATEGORY_LABELS.map((catLabel) => <label key={catLabel} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"><input type="checkbox" className="h-4 w-4 accent-[#234e70]" checked={selectedCategories.includes(catLabel)} onChange={() => { setSelectedGroup('Inservíveis'); setSelectedCategories((current) => (current.includes(catLabel) ? current.filter((name) => name !== catLabel) : [...current, catLabel])) }} />{catLabel}</label>)}
+  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categoria</p>
+  <div className="mb-3 flex gap-2">
+    {GROUPS.map((group) => <button key={group} type="button" className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium ${selectedGroup === group ? 'border-[#4a7fa7] bg-[#4a7fa7] text-white' : 'border-slate-200 bg-slate-50 text-slate-700'}`} onClick={() => { if (selectedGroup !== group) { setSelectedGroup(group); setSelectedCategories([]) } }}>{group}</button>)}
   </div>
+  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Subcategorias</p>
+  {selectedGroup === null ? (
+    <p className="text-xs text-slate-500">Escolha Inservíveis ou Estoque para filtrar por subcategoria.</p>
+  ) : (
+    <div className="flex flex-col gap-1">
+      {SUBCATEGORIES[selectedGroup].map((sub) => <label key={sub.label} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"><input type="checkbox" className="h-4 w-4 accent-[#4a7fa7]" checked={selectedCategories.includes(sub.label)} onChange={() => setSelectedCategories((current) => (current.includes(sub.label) ? current.filter((name) => name !== sub.label) : [...current, sub.label]))} />{sub.label}</label>)}
+    </div>
+  )}
   <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
     <button className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40" disabled={selectedCategories.length === 0 && selectedGroup === null} onClick={() => { setSelectedCategories([]); setSelectedGroup(null) }}>Limpar</button>
     <button className="primary-button small" onClick={() => setFilterAnchor(null)}>Concluir</button>
@@ -662,7 +711,7 @@ function InventoryTable({
                 <td><span>{item.date}</span><small className="table-sub">{item.age === 'hoje' ? 'Cadastrado hoje' : `Há ${item.age}`}</small></td>
                 <td>
                   <div className="tag-list">
-                    {(item.group === 'Estoque' ? ['Estoque'] : item.categories).slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}
+                    {(item.categories.length > 0 ? item.categories : item.group === 'Estoque' ? ['Estoque'] : []).slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}
                   </div>
                 </td>
                 <td><span className={`status-badge ${item.status === 'Retirado' || item.discarded ? 'retired' : ''}`}><i />{item.status}</span></td>
@@ -744,7 +793,7 @@ function InventoryTable({
                       Cancelar
                     </button>
                     <button
-                      className="flex-1 rounded-md bg-red-600 px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700"
+                      className="flex-1 rounded-md bg-[#c4574a] px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#ad483c]"
                       onClick={() => {
                         const { docId, id } = menu
                         setMenu(null)
@@ -757,7 +806,7 @@ function InventoryTable({
                 </>
               ) : (
                 <button
-                  className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-[#b5604f] transition-colors hover:bg-[#fbebe8]"
                   onClick={() => setMenu((current) => (current ? { ...current, confirming: true } : current))}
                 >
                   Excluir item
@@ -793,7 +842,7 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
   const update = (field: Exclude<keyof NewItemData, 'categories' | 'group'>, value: string) => setForm((current) => ({ ...current, [field]: value }))
   const toggleCategory = (label: string) => setForm((current) => ({
     ...current,
-    categories: current.categories.includes(label) ? current.categories.filter((name) => name !== label) : [...current.categories, label],
+    categories: current.group === 'Estoque' ? [label] : current.categories.includes(label) ? current.categories.filter((name) => name !== label) : [...current.categories, label],
   }))
 
   const submit = async () => {
@@ -837,8 +886,8 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
               <button
                 key={group}
                 type="button"
-                className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium ${form.group === group ? 'border-[#234e70] bg-[#234e70] text-white' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
-                onClick={() => setForm((current) => ({ ...current, group }))}
+                className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium ${form.group === group ? 'border-[#4a7fa7] bg-[#4a7fa7] text-white' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                onClick={() => setForm((current) => ({ ...current, group, categories: current.group === group ? current.categories : [DEFAULT_SUBCATEGORY[group]] }))}
               >
                 {group}
               </button>
@@ -896,23 +945,21 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
           </label>
         </div>
 
-        {form.group === 'Inservíveis' && (
         <div className="mt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Subcategorias do item</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{form.group === 'Estoque' ? 'Subcategoria do item' : 'Subcategorias do item'}</p>
           <div className="flex flex-wrap gap-2">
-            {SUBCATEGORY_LABELS.map((category) => (
-              <button 
-                key={category} 
-                type="button" 
-                className={`px-3 py-1.5 rounded-md text-xs font-medium border ${form.categories.includes(category) ? 'bg-[#234e70] text-white border-[#234e70]' : 'bg-slate-50 text-slate-700 border-slate-200'}`} 
-                onClick={() => toggleCategory(category)}
+            {SUBCATEGORIES[form.group].map(({ label }) => (
+              <button
+                key={label}
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-xs font-medium border ${form.categories.includes(label) ? 'bg-[#4a7fa7] text-white border-[#4a7fa7]' : 'bg-slate-50 text-slate-700 border-slate-200'}`}
+                onClick={() => toggleCategory(label)}
               >
-                {category}
+                {label}
               </button>
             ))}
           </div>
         </div>
-        )}
 
         {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
 
