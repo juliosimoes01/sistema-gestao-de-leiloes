@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
+  Archive,
+  Trash2,
   AlertTriangle,
   ArrowDownToLine,
   BarChart3,
@@ -56,6 +58,8 @@ import {
   YAxis,
 } from 'recharts'
 
+type Group = 'Inservíveis' | 'Estoque'
+
 type Item = {
   docId: string
   id: string
@@ -69,9 +73,12 @@ type Item = {
   status: string
   categories: string[]
   auction: boolean
+  group: Group
+  discarded: boolean
 }
 
 type NewItemData = {
+  group: Group
   name: string
   type: string
   model: string
@@ -85,6 +92,17 @@ type NewItemData = {
 const itemTypes = ['Monitores', 'Teclados', 'Mouses', 'Dockstations', 'APs', 'Telefones', 'Placas de circuito', 'Placas de vídeo', 'Baterias', 'Memória RAM', 'HDs', 'Fontes', 'Extensões de tomada', 'Webcams', 'Impressoras', 'Leitores de DVD']
 
 const PIE_COLORS = ['#234e70', '#4f8a81', '#c98235', '#728c45', '#687786', '#a259ff', '#f24e1e', '#0acf83']
+
+const GROUPS: Group[] = ['Inservíveis', 'Estoque']
+
+// As antigas "categorias" agora são subcategorias de Inservíveis.
+const SUBCATEGORIES = [
+  { label: 'Com patrimônio', icon: Tag, color: 'bg-[#234e70]' },
+  { label: 'Sem patrimônio', icon: Box, color: 'bg-[#4f8a81]' },
+  { label: 'Sem garantia', icon: ShieldAlert, color: 'bg-[#c98235]' },
+  { label: 'Funcionais', icon: PackageCheck, color: 'bg-[#728c45]' },
+]
+const SUBCATEGORY_LABELS = SUBCATEGORIES.map((sub) => sub.label)
 
 function formatDate(isoDate?: string) {
   if (!isoDate) return ''
@@ -117,11 +135,14 @@ function toItem(docId: string, data: DocumentData): Item {
     status: data.status ?? 'Armazenado',
     categories: Array.isArray(data.categories) ? data.categories : [],
     auction: Boolean(data.auction),
+    group: data.group === 'Estoque' ? 'Estoque' : 'Inservíveis',
+    discarded: Boolean(data.discarded),
   }
 }
 
 async function createItem(data: NewItemData) {
-  const counterRef = doc(db, 'counters', 'inserviveis')
+  const isStock = data.group === 'Estoque'
+  const counterRef = doc(db, 'counters', isStock ? 'estoque' : 'inserviveis')
   const itemRef = doc(collection(db, 'inserviveis'))
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(counterRef)
@@ -129,7 +150,7 @@ async function createItem(data: NewItemData) {
     const year = data.registeredAt.slice(0, 4) || String(new Date().getFullYear())
     transaction.set(counterRef, { value: next })
     transaction.set(itemRef, {
-      code: `INV-${year}-${String(next).padStart(4, '0')}`,
+      code: `${isStock ? 'EST' : 'INV'}-${year}-${String(next).padStart(4, '0')}`,
       name: data.name.trim(),
       type: data.type,
       model: data.model.trim(),
@@ -138,23 +159,26 @@ async function createItem(data: NewItemData) {
       serviceTag: data.serviceTag.trim(),
       registeredAt: data.registeredAt,
       status: 'Armazenado',
-      categories: data.categories,
+      group: data.group,
+      categories: isStock ? [] : data.categories,
       auction: false,
+      discarded: false,
       createdAt: serverTimestamp(),
     })
   })
 }
 
 function MetricCard({ label, value, detail, icon: Icon, tone = 'blue' }: { label: string; value: string | number; detail: string; icon: typeof Box; tone?: string }) {
-  const tones: Record<string, string> = { blue: 'bg-[#eaf2f8] text-[#234e70]', green: 'bg-[#edf5ed] text-[#567341]', amber: 'bg-[#fff3e3] text-[#b46c1c]', navy: 'bg-[#eef1f3] text-[#3d5061]' }
+  const tones: Record<string, string> = { blue: 'bg-[#eaf2f8] text-[#234e70]', green: 'bg-[#edf5ed] text-[#567341]', amber: 'bg-[#fff3e3] text-[#b46c1c]', navy: 'bg-[#eef1f3] text-[#3d5061]', red: 'bg-[#fdecec] text-[#b3382f]' }
   return <div className="metric-card"><div className={`metric-icon ${tones[tone]}`}><Icon size={19} strokeWidth={1.8} /></div><div className="min-w-0"><p className="metric-label">{label}</p><p className="metric-value">{value}</p><p className="metric-detail">{detail}</p></div></div>
 }
 
-type ReportRow = Record<'id' | 'item' | 'type' | 'serial' | 'tag' | 'date' | 'age' | 'status' | 'categories' | 'auction', string>
+type ReportRow = Record<'id' | 'item' | 'group' | 'type' | 'serial' | 'tag' | 'date' | 'age' | 'status' | 'categories' | 'auction', string>
 
 const reportColumns: { header: string; key: keyof ReportRow; width: number }[] = [
   { header: 'ID', key: 'id', width: 16 },
   { header: 'Item', key: 'item', width: 34 },
+  { header: 'Categoria', key: 'group', width: 14 },
   { header: 'Tipo', key: 'type', width: 16 },
   { header: 'Serial', key: 'serial', width: 14 },
   { header: 'Patrimônio', key: 'tag', width: 14 },
@@ -169,6 +193,7 @@ function buildReportRows(rows: Item[]): ReportRow[] {
   return rows.map((item) => ({
     id: item.id,
     item: item.item,
+    group: item.group,
     type: item.type,
     serial: item.serial,
     tag: item.tag,
@@ -288,10 +313,113 @@ function FloatingPanel({ anchor, width, label, onClose, children }: { anchor: DO
   return <div ref={ref} role="dialog" aria-label={label} className="rounded-xl border border-slate-200 bg-white p-3 shadow-xl" style={{ position: 'fixed', zIndex: 60, width, left, ...position }}>{children}</div>
 }
 
+const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+const PERIOD_OPTIONS = ['2026-2027', '2027-2028', '2028-2029', '2029-2030']
+
+function buildPeriodSeries(list: Item[], period: string) {
+  const monthMap: Record<string, number> = {}
+  list.forEach((item) => {
+    if (!item.rawRegisteredAt) return
+    const [year, month] = item.rawRegisteredAt.split('-')
+    const monthIndex = parseInt(month, 10) - 1
+    if (monthIndex >= 0 && monthIndex < 12) {
+      const key = `${year} ${MONTH_NAMES[monthIndex]}`
+      monthMap[key] = (monthMap[key] || 0) + 1
+    }
+  })
+  const [start, end] = period.split('-').map(Number)
+  const result: { name: string; cadastrados: number }[] = []
+  for (let year = start; year <= end; year++) {
+    MONTH_NAMES.forEach((month) => {
+      const key = `${year} ${month}`
+      result.push({ name: key, cadastrados: monthMap[key] || 0 })
+    })
+  }
+  return result
+}
+
+function buildTypeDistribution(list: Item[]) {
+  const counts: Record<string, number> = {}
+  list.forEach((item) => {
+    const type = item.type || 'Outros'
+    counts[type] = (counts[type] || 0) + 1
+  })
+  return Object.entries(counts).map(([name, value], index) => ({ name, value, color: PIE_COLORS[index % PIE_COLORS.length] }))
+}
+
+function MovementPanel({ title, data, period, onPeriodChange, color }: { title: string; data: { name: string; cadastrados: number }[]; period: string; onPeriodChange: (value: string) => void; color: string }) {
+  return (
+    <div className="panel large-panel">
+      <div className="panel-header">
+        <div>
+          <h2>{title}</h2>
+          <p>Itens cadastrados por mês</p>
+        </div>
+        <label className="period-select">
+          <span className="sr-only">Período do gráfico</span>
+          <select value={period} onChange={(event) => onPeriodChange(event.target.value)}>
+            {PERIOD_OPTIONS.map((option) => <option key={option} value={option}>{option.replace('-', '–')} · mensal</option>)}
+          </select>
+          <ChevronDown size={15} />
+        </label>
+      </div>
+      <div className="chart-area">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 12, right: 10, left: -20, bottom: 0 }} barGap={7}>
+            <CartesianGrid vertical={false} stroke="#e7ecef" />
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} allowDecimals={false} />
+            <Tooltip cursor={{ fill: '#f4f7f8' }} contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />
+            <Bar dataKey="cadastrados" name="Cadastrados" fill={color} radius={[4, 4, 0, 0]} barSize={12} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="chart-legend">
+        <span><i className="legend-blue" style={{ backgroundColor: color }} />Itens cadastrados</span>
+        <span className="chart-total">Total no período: {data.reduce((sum, entry) => sum + entry.cadastrados, 0)}</span>
+      </div>
+    </div>
+  )
+}
+
+function DistributionPanel({ title, subtitle, data, total }: { title: string; subtitle: string; data: { name: string; value: number; color: string }[]; total: number }) {
+  const chartData = data.length > 0 ? data : [{ name: 'Sem itens', value: 1, color: '#e2e8f0' }]
+  return (
+    <div className="panel category-panel">
+      <div className="panel-header">
+        <div>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+      </div>
+      <div className="pie-wrap">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={chartData} cx="50%" cy="48%" innerRadius={55} outerRadius={84} paddingAngle={3} dataKey="value" stroke="none">
+              {chartData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+            </Pie>
+            {data.length > 0 && <Tooltip contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />}
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pie-center"><strong>{total}</strong><span>itens</span></div>
+      </div>
+      <div className="category-legend">
+        {data.map((entry) => (
+          <div key={entry.name}>
+            <span><i style={{ backgroundColor: entry.color }} />{entry.name}</span>
+            <strong>{entry.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function InventoryDashboard() {
   const [activeSection, setActiveSection] = useState('Visão geral')
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
-  const activeCategory = selectedCategories.length === 0 ? 'Todos os itens' : selectedCategories.length === 1 ? selectedCategories[0] : `${selectedCategories.length} categorias`
+  const activeCategory = selectedCategories.length === 1 ? selectedCategories[0] : selectedCategories.length > 1 ? `${selectedCategories.length} subcategorias` : selectedGroup ?? 'Todos os itens'
   const [filterAnchor, setFilterAnchor] = useState<DOMRect | null>(null)
   const [downloadAnchor, setDownloadAnchor] = useState<DOMRect | null>(null)
   const [query, setQuery] = useState('')
@@ -299,6 +427,7 @@ export default function InventoryDashboard() {
   const [showMobileNav, setShowMobileNav] = useState(false)
   const [toast, setToast] = useState('')
   const [selectedPeriod, setSelectedPeriod] = useState('2026-2027')
+  const [stockPeriod, setStockPeriod] = useState('2026-2027')
   const [items, setItems] = useState<Item[]>([])
 
   useEffect(() => {
@@ -310,24 +439,24 @@ export default function InventoryDashboard() {
     )
   }, [])
 
-  // --- CÁLCULO DE CATEGORIAS DINÂMICAS PARA A SIDEBAR ---
-  const dynamicCategories = useMemo(() => {
-    const baseCategories = [
-      { label: 'Com patrimônio', icon: Tag, color: 'bg-[#234e70]', accent: '#234e70' },
-      { label: 'Sem patrimônio', icon: Box, color: 'bg-[#4f8a81]', accent: '#4f8a81' },
-      { label: 'Sem garantia', icon: ShieldAlert, color: 'bg-[#c98235]', accent: '#c98235' },
-      { label: 'Funcionais', icon: PackageCheck, color: 'bg-[#728c45]', accent: '#728c45' },
-    ]
+  // --- ITENS ATIVOS (descartados ficam fora dos totais) POR CATEGORIA ---
+  const activeItems = useMemo(() => items.filter((item) => !item.discarded), [items])
+  const inserviveisItems = useMemo(() => activeItems.filter((item) => item.group === 'Inservíveis'), [activeItems])
+  const estoqueItems = useMemo(() => activeItems.filter((item) => item.group === 'Estoque'), [activeItems])
 
-    return baseCategories.map(cat => ({
-      ...cat,
-      count: items.filter(item => item.categories.includes(cat.label)).length
-    }))
-  }, [items])
+  // --- SUBCATEGORIAS DE INSERVÍVEIS (CONTAGEM PARA A SIDEBAR) ---
+  const dynamicSubcategories = useMemo(
+    () => SUBCATEGORIES.map((sub) => ({ ...sub, count: inserviveisItems.filter((item) => item.categories.includes(sub.label)).length })),
+    [inserviveisItems],
+  )
 
   // --- CÁLCULOS DAS MÉTRICAS DO TOPO ---
-  const totalInserviveis = items.length
-  const aguardandoLeilaoCount = useMemo(() => {return items.filter((item) => item.categories.includes('Sem garantia') && !item.auction).length}, [items])
+  const totalInserviveis = inserviveisItems.length
+  const totalEstoque = estoqueItems.length
+  const descartadosCount = useMemo(() => items.filter((item) => item.discarded).length, [items])
+  const aguardandoLeilaoCount = useMemo(() => inserviveisItems.filter((item) => item.categories.includes('Sem garantia') && !item.auction).length, [inserviveisItems])
+  const retiradosCount = useMemo(() => inserviveisItems.filter((item) => item.auction).length, [inserviveisItems])
+
   const deleteItem = async (docId: string, itemId: string) => {
     try {
       await deleteDoc(doc(db, 'inserviveis', docId))
@@ -336,8 +465,16 @@ export default function InventoryDashboard() {
       notify('Não foi possível excluir o item')
     }
   }
-  const retiradosCount = useMemo(() => {return items.filter((item) => item.auction).length}, [items])
-  
+
+  const setDiscarded = async (docId: string, itemId: string, value: boolean) => {
+    try {
+      await updateDoc(doc(db, 'inserviveis', docId), { discarded: value, status: value ? 'Descartado' : 'Armazenado' })
+      notify(value ? `Item ${itemId} descartado` : `Item ${itemId} restaurado`)
+    } catch {
+      notify('Não foi possível atualizar o item')
+    }
+  }
+
   const cadastradosNoMesCount = useMemo(() => {
     const now = new Date()
     const currentYear = now.getFullYear()
@@ -346,58 +483,18 @@ export default function InventoryDashboard() {
     return items.filter((i) => i.rawRegisteredAt && i.rawRegisteredAt.startsWith(prefix)).length
   }, [items])
 
-  // --- GRÁFICO DINÂMICO POR TIPO DE ITEM ---
-  const pieDataDynamic = useMemo(() => {
-    const counts: Record<string, number> = {}
-    items.forEach(item => {
-      const t = item.type || 'Outros'
-      counts[t] = (counts[t] || 0) + 1
-    })
-
-    return Object.entries(counts).map(([name, value], index) => ({
-      name,
-      value,
-      color: PIE_COLORS[index % PIE_COLORS.length]
-    }))
-  }, [items])
-
-  // --- GRÁFICO DINÂMICO DE MOVIMENTAÇÃO POR MÊS ---
-  const periodDataDynamic = useMemo(() => {
-    const monthMap: Record<string, number> = {}
-    items.forEach(item => {
-      if (item.rawRegisteredAt) {
-        const [y, m] = item.rawRegisteredAt.split('-')
-        const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-        const monthIndex = parseInt(m, 10) - 1
-        if (monthIndex >= 0 && monthIndex < 12) {
-          const key = `${y} ${monthNames[monthIndex]}`
-          monthMap[key] = (monthMap[key] || 0) + 1
-        }
-      }
-    })
-
-    const [start, end] = selectedPeriod.split('-').map(Number)
-    const result: { name: string; cadastrados: number }[] = []
-
-    for (let y = start; y <= end; y++) {
-      const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-      monthNames.forEach(m => {
-        const key = `${y} ${m}`
-        result.push({
-          name: key,
-          cadastrados: monthMap[key] || 0
-        })
-      })
-    }
-
-    return result
-  }, [items, selectedPeriod])
+  // --- GRÁFICOS: DISTRIBUIÇÃO POR TIPO E MOVIMENTAÇÃO MENSAL (INSERVÍVEIS E ESTOQUE) ---
+  const pieInserviveis = useMemo(() => buildTypeDistribution(inserviveisItems), [inserviveisItems])
+  const pieEstoque = useMemo(() => buildTypeDistribution(estoqueItems), [estoqueItems])
+  const periodInserviveis = useMemo(() => buildPeriodSeries(items.filter((item) => item.group === 'Inservíveis'), selectedPeriod), [items, selectedPeriod])
+  const periodEstoque = useMemo(() => buildPeriodSeries(items.filter((item) => item.group === 'Estoque'), stockPeriod), [items, stockPeriod])
 
   const filteredItems = useMemo(() => items.filter((item) => {
     const matchesQuery = `${item.item} ${item.id} ${item.serial} ${item.tag}`.toLowerCase().includes(query.toLowerCase())
     const matchesCategory = selectedCategories.length === 0 || item.categories.some((category) => selectedCategories.includes(category))
-    return matchesQuery && matchesCategory
-  }), [items, query, selectedCategories])
+    const matchesGroup = selectedGroup === null || item.group === selectedGroup
+    return matchesQuery && matchesCategory && matchesGroup
+  }), [items, query, selectedCategories, selectedGroup])
 
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(''), 2600) }
 
@@ -419,7 +516,8 @@ export default function InventoryDashboard() {
     const rows = buildReportRows(filteredItems)
     const filename = `relatorio-inserviveis-${new Date().toLocaleDateString('en-CA')}`
     const filterLabel = [
-      selectedCategories.length > 0 ? `Categorias: ${selectedCategories.join(', ')}` : 'Todas as categorias',
+      selectedGroup ? `Categoria: ${selectedGroup}` : 'Todas as categorias',
+      selectedCategories.length > 0 ? `Subcategorias: ${selectedCategories.join(', ')}` : '',
       query.trim() ? `Busca: "${query.trim()}"` : '',
     ].filter(Boolean).join(' · ')
     try {
@@ -439,7 +537,21 @@ export default function InventoryDashboard() {
         <p className="nav-caption">GESTÃO</p>
         {[['Visão geral', LayoutDashboard], ['Inventário', ClipboardList]].map(([label, Icon]) => <button key={label as string} className={`nav-link ${activeSection === label ? 'active' : ''}`} onClick={() => { setActiveSection(label as string); setShowMobileNav(false) }}><Icon size={18} />{label as string}</button>)}
         <p className="nav-caption nav-caption-spaced">CATEGORIAS</p>
-        {dynamicCategories.map(({ label, count, icon: Icon, color }) => <button key={label} className={`category-link ${selectedCategories.includes(label) ? 'selected' : ''}`} onClick={() => { setSelectedCategories((current) => (current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span></button>)}
+        {GROUPS.map((group) => {
+          const GroupIcon = group === 'Estoque' ? Archive : Box
+          const groupCount = group === 'Estoque' ? totalEstoque : totalInserviveis
+          const groupSelected = selectedGroup === group && selectedCategories.length === 0
+          return (
+            <div key={group}>
+              <button className={`category-link ${groupSelected ? 'selected' : ''}`} onClick={() => { setSelectedGroup(groupSelected ? null : group); setSelectedCategories([]); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${group === 'Estoque' ? 'bg-[#4f8a81]' : 'bg-[#234e70]'}`}><GroupIcon size={13} /></span>{group}<span className="category-count">{groupCount}</span></button>
+              {group === 'Inservíveis' && (
+                <div className="ml-4 border-l border-slate-200 pl-2">
+                  {dynamicSubcategories.map(({ label, count, icon: Icon, color }) => <button key={label} className={`category-link ${selectedCategories.includes(label) ? 'selected' : ''}`} onClick={() => { setSelectedGroup('Inservíveis'); setSelectedCategories((current) => (current.length === 1 && current[0] === label ? [] : [label])); setActiveSection('Inventário'); setShowMobileNav(false) }}><span className={`category-dot ${color}`}><Icon size={13} /></span>{label}<span className="category-count">{count}</span></button>)}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
       <div className="sidebar-bottom">
         <button className={`nav-link ${activeSection === 'Configurações' ? 'active' : ''}`} onClick={() => { setActiveSection('Configurações'); setShowMobileNav(false) }}>
@@ -468,88 +580,35 @@ export default function InventoryDashboard() {
           </div>
         ) : activeSection === 'Visão geral' ? <>
           <div className="metrics-grid">
-  <MetricCard label="Total de Inservíveis" value={totalInserviveis} detail="itens cadastrados" icon={Box} />
-  <MetricCard label="Aguardando leilão" value={aguardandoLeilaoCount} detail="itens sem garantia" icon={Gavel} tone="amber" />
-  <MetricCard label="Cadastrados no mês" value={cadastradosNoMesCount} detail="no mês atual" icon={ClipboardList} tone="green" />
-  <MetricCard label="Retirados / Leiloados" value={retiradosCount} detail={`${totalInserviveis > 0 ? ((retiradosCount / totalInserviveis) * 100).toFixed(1) : 0}% do total`} icon={Truck} tone="navy" />
-</div>
+            <MetricCard label="Total de Inservíveis" value={totalInserviveis} detail="itens cadastrados" icon={Box} />
+            <MetricCard label="Total de Estoque" value={totalEstoque} detail="itens em estoque" icon={Archive} tone="green" />
+            <MetricCard label="Aguardando leilão" value={aguardandoLeilaoCount} detail="itens sem garantia" icon={Gavel} tone="amber" />
+            <MetricCard label="Cadastrados no mês" value={cadastradosNoMesCount} detail="inservíveis e estoque" icon={ClipboardList} tone="green" />
+            <MetricCard label="Retirados / Leiloados" value={retiradosCount} detail={`${totalInserviveis > 0 ? ((retiradosCount / totalInserviveis) * 100).toFixed(1) : 0}% dos inservíveis`} icon={Truck} tone="navy" />
+            <MetricCard label="Descartados" value={descartadosCount} detail={descartadosCount === 1 ? 'item descartado' : 'itens descartados'} icon={Trash2} tone="red" />
+          </div>
           <div className="dashboard-grid">
-            <div className="panel large-panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Movimentação de inservíveis</h2>
-                  <p>Itens cadastrados por mês</p>
-                </div>
-                <label className="period-select">
-                  <span className="sr-only">Período do gráfico</span>
-                  <select value={selectedPeriod} onChange={(event) => setSelectedPeriod(event.target.value)}>
-                    <option value="2026-2027">2026–2027 · mensal</option>
-                    <option value="2027-2028">2027–2028 · mensal</option>
-                    <option value="2028-2029">2028–2029 · mensal</option>
-                    <option value="2029-2030">2029–2030 · mensal</option>
-                  </select>
-                  <ChevronDown size={15} />
-                </label>
-              </div>
-              <div className="chart-area">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={periodDataDynamic} margin={{ top: 12, right: 10, left: -20, bottom: 0 }} barGap={7}>
-                    <CartesianGrid vertical={false} stroke="#e7ecef" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#84909a', fontSize: 12 }} />
-                    <Tooltip cursor={{ fill: '#f4f7f8' }} contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />
-                    <Bar dataKey="cadastrados" name="Cadastrados" fill="#234e70" radius={[4, 4, 0, 0]} barSize={12} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="chart-legend">
-                <span><i className="legend-blue" />Itens cadastrados</span>
-                <span className="chart-total">Total no período: {periodDataDynamic.reduce((a, b) => a + b.cadastrados, 0)}</span>
-              </div>
-            </div>
-            
-            <div className="panel category-panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Por categoria</h2>
-                  <p>Distribuição do estoque</p>
-                </div>
-              </div>
-              <div className="pie-wrap">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={pieDataDynamic.length > 0 ? pieDataDynamic : [{ name: 'Sem itens', value: 1, color: '#e2e8f0' }]} cx="50%" cy="48%" innerRadius={55} outerRadius={84} paddingAngle={3} dataKey="value" stroke="none">
-                      {pieDataDynamic.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ border: '1px solid #e1e8ec', borderRadius: 8, fontSize: 12 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="pie-center"><strong>{totalInserviveis}</strong><span>itens</span></div>
-              </div>
-              <div className="category-legend">
-                {pieDataDynamic.map((entry) => (
-                  <div key={entry.name}>
-                    <span><i style={{ backgroundColor: entry.color }} />{entry.name}</span>
-                    <strong>{entry.value}</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <MovementPanel title="Movimentação de inservíveis" data={periodInserviveis} period={selectedPeriod} onPeriodChange={setSelectedPeriod} color="#234e70" />
+            <DistributionPanel title="Por categoria" subtitle="Distribuição por inservíveis" data={pieInserviveis} total={totalInserviveis} />
+          </div>
+          <div className="dashboard-grid">
+            <MovementPanel title="Movimentação de estoque" data={periodEstoque} period={stockPeriod} onPeriodChange={setStockPeriod} color="#4f8a81" />
+            <DistributionPanel title="Por categoria" subtitle="Distribuição por estoque" data={pieEstoque} total={totalEstoque} />
           </div>
           <div className="section-heading"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema</p></div><button className="text-button" onClick={() => setActiveSection('Inventário')}>Ver inventário completo <span>→</span></button></div>
-        </> : <div className="panel inventory-panel"><div className="panel-header"><div><h2>{activeCategory === 'Todos os itens' ? 'Todos os itens' : activeCategory}</h2><p>Consulte, filtre e atualize os materiais cadastrados.</p></div><div className="panel-actions"><button className="secondary-button small" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setDownloadAnchor(null); setFilterAnchor((current) => (current ? null : rect)) }}><Filter size={15} />Filtros{selectedCategories.length > 0 && <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#234e70] px-1 text-[10px] font-semibold text-white">{selectedCategories.length}</span>}</button>
+        </> : <div className="panel inventory-panel"><div className="panel-header"><div><h2>{activeCategory === 'Todos os itens' ? 'Todos os itens' : activeCategory}</h2><p>Consulte, filtre e atualize os materiais cadastrados.</p></div><div className="panel-actions"><button className="secondary-button small" data-popover-trigger aria-haspopup="dialog" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setDownloadAnchor(null); setFilterAnchor((current) => (current ? null : rect)) }}><Filter size={15} />Filtros{(selectedCategories.length > 0 || selectedGroup !== null) && <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#234e70] px-1 text-[10px] font-semibold text-white">{selectedCategories.length > 0 ? selectedCategories.length : 1}</span>}</button>
 {filterAnchor && <FloatingPanel anchor={filterAnchor} width={264} label="Filtrar por categoria" onClose={() => setFilterAnchor(null)}>
-  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categoria</p>
+  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Subcategorias de Inservíveis</p>
   <div className="flex flex-col gap-1">
-    {['Com patrimônio', 'Sem patrimônio', 'Sem garantia', 'Funcionais'].map((catLabel) => <label key={catLabel} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"><input type="checkbox" className="h-4 w-4 accent-[#234e70]" checked={selectedCategories.includes(catLabel)} onChange={() => setSelectedCategories((current) => (current.includes(catLabel) ? current.filter((name) => name !== catLabel) : [...current, catLabel]))} />{catLabel}</label>)}
+    {SUBCATEGORY_LABELS.map((catLabel) => <label key={catLabel} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"><input type="checkbox" className="h-4 w-4 accent-[#234e70]" checked={selectedCategories.includes(catLabel)} onChange={() => { setSelectedGroup('Inservíveis'); setSelectedCategories((current) => (current.includes(catLabel) ? current.filter((name) => name !== catLabel) : [...current, catLabel])) }} />{catLabel}</label>)}
   </div>
   <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
-    <button className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40" disabled={selectedCategories.length === 0} onClick={() => setSelectedCategories([])}>Limpar</button>
+    <button className="text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40" disabled={selectedCategories.length === 0 && selectedGroup === null} onClick={() => { setSelectedCategories([]); setSelectedGroup(null) }}>Limpar</button>
     <button className="primary-button small" onClick={() => setFilterAnchor(null)}>Concluir</button>
   </div>
-</FloatingPanel>}<button className="primary-button small" onClick={() => setShowNew(true)}><Plus size={15} />Novo item</button></div></div><InventoryTable items={filteredItems} onNotify={notify} onAuctionChange={setAuction} onDeleteItem={deleteItem} /></div>}
+</FloatingPanel>}<button className="primary-button small" onClick={() => setShowNew(true)}><Plus size={15} />Novo item</button></div></div><InventoryTable items={filteredItems} onNotify={notify} onAuctionChange={setAuction} onDeleteItem={deleteItem} onDiscardItem={setDiscarded} /></div>}
 
-        {activeSection === 'Visão geral' && <div className="panel inventory-panel"><div className="panel-header"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema.</p></div><div className="panel-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item, serial ou patrimônio" /></div><button className="secondary-button small" onClick={() => setActiveSection('Inventário')}>Ver todos <ArrowDownToLine size={15} /></button></div></div><InventoryTable items={filteredItems.slice(0, 4)} onNotify={notify} onAuctionChange={setAuction} onDeleteItem={deleteItem} /></div>}
+        {activeSection === 'Visão geral' && <div className="panel inventory-panel"><div className="panel-header"><div><h2>Itens recentes</h2><p>Últimas movimentações registradas no sistema.</p></div><div className="panel-actions"><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item, serial ou patrimônio" /></div><button className="secondary-button small" onClick={() => setActiveSection('Inventário')}>Ver todos <ArrowDownToLine size={15} /></button></div></div><InventoryTable items={filteredItems.slice(0, 4)} onNotify={notify} onAuctionChange={setAuction} onDeleteItem={deleteItem} onDiscardItem={setDiscarded} /></div>}
       </div>
     </main>
     {showNew && <NewItemModal onClose={() => setShowNew(false)} onSave={async (data) => { await createItem(data); setShowNew(false); notify('Item cadastrado com sucesso') }} />}
@@ -561,14 +620,18 @@ function InventoryTable({
   items: rows, 
   onNotify, 
   onAuctionChange, 
-  onDeleteItem 
+  onDeleteItem,
+  onDiscardItem
 }: { 
   items: Item[]; 
   onNotify: (message: string) => void; 
   onAuctionChange: (id: string, value: boolean) => void | Promise<void>; 
   onDeleteItem?: (docId: string, id: string) => void | Promise<void>;
+  onDiscardItem?: (docId: string, id: string, value: boolean) => void | Promise<void>;
 }) {
   const [menu, setMenu] = useState<{ id: string; docId: string; rect: DOMRect; confirming?: boolean } | null>(null)
+  const menuItem = menu ? rows.find((row) => row.docId === menu.docId) : undefined
+  const showAuction = menuItem?.group !== 'Estoque' && !menuItem?.discarded
 
   return (
     <div className="table-scroll">
@@ -599,11 +662,11 @@ function InventoryTable({
                 <td><span>{item.date}</span><small className="table-sub">{item.age === 'hoje' ? 'Cadastrado hoje' : `Há ${item.age}`}</small></td>
                 <td>
                   <div className="tag-list">
-                    {item.categories.slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}
+                    {(item.group === 'Estoque' ? ['Estoque'] : item.categories).slice(0, 2).map((category) => <span key={category} className="table-tag">{category}</span>)}
                   </div>
                 </td>
-                <td><span className={`status-badge ${item.status === 'Retirado' ? 'retired' : ''}`}><i />{item.status}</span></td>
-                <td>{isAuctioned ? <span className="auction-yes"><Gavel size={13} />Sim</span> : <span className="auction-no">Não</span>}</td>
+                <td><span className={`status-badge ${item.status === 'Retirado' || item.discarded ? 'retired' : ''}`}><i />{item.status}</span></td>
+                <td>{item.group === 'Estoque' || item.discarded ? <span className="auction-no">—</span> : isAuctioned ? <span className="auction-yes"><Gavel size={13} />Sim</span> : <span className="auction-no">Não</span>}</td>
                 <td>
                   <button 
                     className="row-menu" 
@@ -631,6 +694,8 @@ function InventoryTable({
       {menu && (
         <FloatingPanel anchor={menu.rect} width={210} label={`Ações do item ${menu.id}`} onClose={() => setMenu(null)}>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">ITEM {menu.id}</p>
+          {showAuction && (
+            <>
           <p className="mb-2 text-xs font-medium text-slate-700">Foi leiloado?</p>
           <div className="mb-3 flex gap-2">
             {([['Sim', true], ['Não', false]] as const).map(([label, value]) => (
@@ -647,6 +712,24 @@ function InventoryTable({
               </button>
             ))}
           </div>
+            </>
+          )}
+
+          {onDiscardItem && (
+            <div className="border-t border-slate-100 pb-2 pt-2">
+              <button
+                className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                onClick={() => {
+                  const { docId, id } = menu
+                  const discard = !menuItem?.discarded
+                  setMenu(null)
+                  void onDiscardItem(docId, id, discard)
+                }}
+              >
+                {menuItem?.discarded ? 'Restaurar item' : 'Descartar item'}
+              </button>
+            </div>
+          )}
 
           {onDeleteItem && (
             <div className="border-t border-slate-100 pt-2">
@@ -690,6 +773,7 @@ function InventoryTable({
 
 function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data: NewItemData) => Promise<void> }) {
   const [form, setForm] = useState<NewItemData>({
+    group: 'Inservíveis',
     name: '',
     type: '',
     model: '',
@@ -706,7 +790,7 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
   // Lista de tipos incluindo a opção "Outro"
   const itemTypesWithOptions = [...itemTypes, 'Outro']
 
-  const update = (field: keyof Omit<NewItemData, 'categories'>, value: string) => setForm((current) => ({ ...current, [field]: value }))
+  const update = (field: Exclude<keyof NewItemData, 'categories' | 'group'>, value: string) => setForm((current) => ({ ...current, [field]: value }))
   const toggleCategory = (label: string) => setForm((current) => ({
     ...current,
     categories: current.categories.includes(label) ? current.categories.filter((name) => name !== label) : [...current.categories, label],
@@ -740,10 +824,26 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
         <div className="modal-head">
           <div>
             <p className="eyebrow">NOVO REGISTRO</p>
-            <h2>Cadastrar inservível</h2>
+            <h2>{form.group === 'Estoque' ? 'Cadastrar item de estoque' : 'Cadastrar inservível'}</h2>
             <p>Informe os dados para adicionar um material ao estoque.</p>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Fechar"><X size={18} /></button>
+        </div>
+
+        <div className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categoria</p>
+          <div className="flex gap-2">
+            {GROUPS.map((group) => (
+              <button
+                key={group}
+                type="button"
+                className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium ${form.group === group ? 'border-[#234e70] bg-[#234e70] text-white' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                onClick={() => setForm((current) => ({ ...current, group }))}
+              >
+                {group}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="form-grid">
@@ -796,10 +896,11 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
           </label>
         </div>
 
+        {form.group === 'Inservíveis' && (
         <div className="mt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Categorias do item</p>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Subcategorias do item</p>
           <div className="flex flex-wrap gap-2">
-            {['Com patrimônio', 'Sem patrimônio', 'Sem garantia', 'Funcionais'].map((category) => (
+            {SUBCATEGORY_LABELS.map((category) => (
               <button 
                 key={category} 
                 type="button" 
@@ -811,6 +912,7 @@ function NewItemModal({ onClose, onSave }: { onClose: () => void; onSave: (data:
             ))}
           </div>
         </div>
+        )}
 
         {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
 
