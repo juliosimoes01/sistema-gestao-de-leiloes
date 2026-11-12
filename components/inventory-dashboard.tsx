@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MoreHorizontal,
   PackageCheck,
   Plus,
   Search,
@@ -75,6 +76,7 @@ type Item = {
   quantity: number
   model: string
   serviceTag: string
+  image: string
 }
 
 type NewItemData = {
@@ -88,6 +90,7 @@ type NewItemData = {
   registeredAt: string
   categories: string[]
   quantity: number
+  image: string
 }
 
 const itemTypes = [
@@ -173,6 +176,54 @@ function ageFrom(isoDate?: string) {
   return `${years} ${years === 1 ? 'ano' : 'anos'}`
 }
 
+async function compressImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Selecione um arquivo de imagem válido.')
+  }
+
+  const objectUrl = URL.createObjectURL(file)
+
+  try {
+    const image = new Image()
+
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('Não foi possível abrir a imagem.'))
+      image.src = objectUrl
+    })
+
+    let scale = Math.min(1, 720 / Math.max(image.width, image.height))
+    let quality = 0.76
+    let dataUrl = ''
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.width * scale))
+      canvas.height = Math.max(1, Math.round(image.height * scale))
+
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Não foi possível processar a imagem.')
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      dataUrl = canvas.toDataURL('image/jpeg', quality)
+
+      // Mantém a imagem compacta para não ultrapassar o limite do Firestore.
+      if (dataUrl.length <= 260_000) return dataUrl
+
+      if (quality > 0.5) {
+        quality -= 0.1
+      } else {
+        scale *= 0.8
+      }
+    }
+
+    if (!dataUrl) throw new Error('Não foi possível comprimir a imagem.')
+    return dataUrl
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 function toItem(docId: string, data: DocumentData): Item {
   return {
     docId,
@@ -192,6 +243,7 @@ function toItem(docId: string, data: DocumentData): Item {
     quantity: Math.max(1, Number(data.quantity) || 1),
     model: data.model ?? '',
     serviceTag: data.serviceTag ?? '',
+    image: data.image ?? '',
   }
 }
 
@@ -219,6 +271,7 @@ async function createItem(data: NewItemData) {
       group: data.group,
       categories: data.categories,
       quantity: Math.max(1, Number(data.quantity) || 1),
+      image: data.image,
       auction: false,
       discarded: false,
       createdAt: serverTimestamp(),
@@ -784,6 +837,8 @@ function getTypeIllustration(type: string) {
 }
 
 function ItemsByType({ items }: { items: Item[] }) {
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null)
+
   const groups = useMemo(() => {
     const result = new Map<string, { items: Item[]; quantity: number }>()
 
@@ -803,49 +858,156 @@ function ItemsByType({ items }: { items: Item[] }) {
     )
   }, [items])
 
-  if (groups.length === 0) {
-    return (
-      <div className="panel p-8 text-center text-slate-500">
-        Nenhum item cadastrado.
-      </div>
-    )
-  }
-
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {groups.map(([type, group]) => (
-        <div key={type} className="panel p-4">
-          <div className="mb-4 flex items-center gap-3">
-            <div
-              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#e6f0f7] text-3xl"
-              aria-hidden="true"
-            >
-              {getTypeIllustration(type)}
+    <>
+      {groups.length === 0 ? (
+        <div className="panel p-8 text-center text-slate-500">
+          Nenhum item cadastrado.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {groups.map(([type, group]) => (
+            <div key={type} className="panel p-4">
+              <div className="mb-4 flex items-center gap-3">
+                <div
+                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#dceeff] to-[#c8f0e4] text-3xl ring-1 ring-[#9cc8e2]"
+                  aria-hidden="true"
+                >
+                  {getTypeIllustration(type)}
+                </div>
+
+                <div className="min-w-0">
+                  <h2 className="font-semibold text-slate-800">{type}</h2>
+                  <p className="text-sm text-slate-500">
+                    {group.quantity} unidades · {group.items.length}{' '}
+                    {group.items.length === 1 ? 'registro' : 'registros'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                {group.items.map((item) => (
+                  <button
+                    key={item.docId}
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-lg border border-transparent px-2 py-2 text-left transition hover:border-[#b7d8ec] hover:bg-[#f0f8ff] focus:outline-none focus:ring-2 focus:ring-[#3685b7]"
+                    onClick={() => setSelectedItem(item)}
+                    aria-label={`Ver imagem e detalhes de ${item.item}`}
+                  >
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-[#e2f0fa] to-[#dff4ed] text-xl">
+                      {item.image ? (
+                        <img
+                          src={item.image}
+                          alt={item.item}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        getTypeIllustration(type)
+                      )}
+                    </span>
+
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-slate-700">
+                        {item.item}
+                      </span>
+                      <span className="block text-xs text-slate-500">
+                        ID: {item.id}
+                      </span>
+                    </span>
+
+                    <strong className="shrink-0 rounded-full bg-[#e4f2ec] px-2.5 py-1 text-sm text-[#24744f]">
+                      {item.quantity}
+                    </strong>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="min-w-0">
-              <h2 className="font-semibold text-slate-800">{type}</h2>
-              <p className="text-sm text-slate-500">
-                {group.quantity} unidades · {group.items.length}{' '}
-                {group.items.length === 1 ? 'registro' : 'registros'}
+          ))}
+        </div>
+      )}
+
+      {selectedItem && (
+        <ItemImagePreview
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
+    </>
+  )
+}
+
+function ItemImagePreview({
+  item,
+  onClose,
+}: {
+  item: Item
+  onClose: () => void
+}) {
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Imagem do item ${item.item}`}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-[#2875a5]">
+              {item.type || 'Tipo não informado'}
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-800">
+              {item.item}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              ID: {item.id} · Quantidade: {item.quantity}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="rounded-lg p-2 text-slate-500 transition hover:bg-[#eaf4fb] hover:text-[#17649f]"
+            onClick={onClose}
+            aria-label="Fechar imagem"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef]">
+          {item.image ? (
+            <img
+              src={item.image}
+              alt={`Imagem de ${item.item}`}
+              className="max-h-[60vh] w-full object-contain"
+            />
+          ) : (
+            <div className="p-8 text-center">
+              <span className="text-7xl" aria-hidden="true">
+                {getTypeIllustration(item.type)}
+              </span>
+              <p className="mt-4 text-sm text-slate-600">
+                Este item ainda não tem uma imagem cadastrada.
               </p>
             </div>
-          </div>
-
-          <div className="space-y-2 border-t border-slate-100 pt-3">
-            {group.items.map((item) => (
-              <div
-                key={item.docId}
-                className="flex justify-between gap-3 text-sm"
-              >
-                <span className="truncate text-slate-600">{item.item}</span>
-                <strong className="shrink-0 text-slate-700">
-                  {item.quantity}
-                </strong>
-              </div>
-            ))}
-          </div>
+          )}
         </div>
-      ))}
+
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            className="rounded-lg bg-gradient-to-b from-[#3188bd] to-[#17649f] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_0_#104b78] transition hover:brightness-110 active:translate-y-1 active:shadow-none"
+            onClick={onClose}
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1004,6 +1166,7 @@ export default function InventoryDashboard() {
       group: data.group,
       categories: data.categories,
       quantity: Math.max(1, Number(data.quantity) || 1),
+      image: data.image,
     })
   }
 
@@ -1817,10 +1980,7 @@ function InventoryTable({
   ) => void | Promise<void>
   onEditItem?: (item: Item) => void
 }) {
-  const [
-    menu,
-    setMenu,
-  ] = useState<{
+  const [menu, setMenu] = useState<{
     id: string
     docId: string
     rect: DOMRect
@@ -1928,7 +2088,8 @@ function InventoryTable({
 
                 <td>
                   <button
-                    className="row-menu"
+                    type="button"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#72b2d3] bg-gradient-to-b from-[#55a6d2] to-[#17649f] text-white shadow-[0_4px_0_#104b78,0_7px_12px_rgba(23,100,159,0.22)] transition duration-150 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_5px_0_#104b78,0_9px_15px_rgba(23,100,159,0.26)] active:translate-y-[3px] active:shadow-[0_1px_0_#104b78] focus:outline-none focus:ring-2 focus:ring-[#67c7a4] focus:ring-offset-2"
                     data-popover-trigger
                     aria-haspopup="dialog"
                     aria-label={`Opções do item ${item.id}`}
@@ -1946,7 +2107,7 @@ function InventoryTable({
                       )
                     }}
                   >
-                    •••
+                    <MoreHorizontal size={20} strokeWidth={2.8} />
                   </button>
                 </td>
               </tr>
@@ -1964,120 +2125,132 @@ function InventoryTable({
       {menu && (
         <FloatingPanel
           anchor={menu.rect}
-          width={210}
+          width={220}
           label={`Ações do item ${menu.id}`}
           onClose={() => setMenu(null)}
         >
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
             ITEM {menu.id}
           </p>
 
-          {menuItem && onEditItem && (
-            <button
-              className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-              onClick={() => {
-                onEditItem(menuItem)
-                setMenu(null)
-              }}
-            >
-              Editar item
-            </button>
-          )}
-
-          {showAuction && (
-            <>
-              <p className="mb-2 text-xs font-medium text-slate-700">
-                Foi leiloado?
-              </p>
-
-              <div className="mb-3 flex gap-2">
-                {(
-                  [
-                    ['Sim', true],
-                    ['Não', false],
-                  ] as const
-                ).map(([label, value]) => (
-                  <button
-                    key={label}
-                    className={`${
-                      (rows.find((row) => row.id === menu.id)?.auction ??
-                        false) === value
-                        ? 'primary-button'
-                        : 'secondary-button'
-                    } small flex-1 justify-center`}
-                    onClick={() => {
-                      onAuctionChange(menu.id, value)
-                      onNotify(`${menu.id}: leiloado marcado como ${label}`)
-                      setMenu(null)
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {onDiscardItem && (
-            <div className="border-t border-slate-100 pb-2 pt-2">
+          <div className="space-y-2.5">
+            {menuItem && onEditItem && (
               <button
-                className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                type="button"
+                className="flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-[0_2px_0_#e2e8f0] transition hover:bg-[#eef7fb] active:translate-y-[2px] active:shadow-none"
                 onClick={() => {
-                  const { docId, id } = menu
-                  const discard = !menuItem?.discarded
+                  onEditItem(menuItem)
                   setMenu(null)
-                  void onDiscardItem(docId, id, discard)
                 }}
               >
-                {menuItem?.discarded ? 'Restaurar item' : 'Descartar item'}
+                Editar item
               </button>
-            </div>
-          )}
+            )}
 
-          {onDeleteItem && (
-            <div className="border-t border-slate-100 pt-2">
-              {menu.confirming ? (
-                <>
-                  <p className="mb-2 text-xs text-slate-600">
-                    Excluir {menu.id}? Essa ação não pode ser desfeita.
-                  </p>
-                  <div className="flex gap-2">
+            {showAuction && (
+              <div className="border-t border-slate-100 pt-2.5">
+                <p className="mb-2 text-xs font-medium text-slate-700">
+                  Foi leiloado?
+                </p>
+
+                <div className="flex gap-2">
+                  {(
+                    [
+                      ['Sim', true],
+                      ['Não', false],
+                    ] as const
+                  ).map(([label, value]) => (
                     <button
-                      className="secondary-button small flex-1 justify-center"
-                      onClick={() =>
-                        setMenu((current) =>
-                          current ? { ...current, confirming: false } : current,
-                        )
-                      }
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      className="flex-1 rounded-md bg-[#c4574a] px-2 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#ad483c]"
+                      key={label}
+                      type="button"
+                      className={`${
+                        (rows.find((row) => row.id === menu.id)?.auction ??
+                          false) === value
+                          ? value
+                            ? 'rounded-lg bg-gradient-to-b from-[#38a879] to-[#21764f] text-white shadow-[0_3px_0_#15583a]'
+                            : 'rounded-lg bg-gradient-to-b from-[#3188bd] to-[#17649f] text-white shadow-[0_3px_0_#104b78]'
+                          : 'rounded-lg border border-slate-200 bg-white text-slate-700 shadow-[0_2px_0_#e2e8f0] hover:bg-[#eef7fb]'
+                      } flex flex-1 items-center justify-center py-1.5 text-xs font-semibold transition active:translate-y-[2px] active:shadow-none`}
                       onClick={() => {
-                        const { docId, id } = menu
+                        onAuctionChange(menu.id, value)
+                        onNotify(`${menu.id}: leiloado marcado como ${label}`)
                         setMenu(null)
-                        void onDeleteItem(docId, id)
                       }}
                     >
-                      Excluir
+                      {label}
                     </button>
-                  </div>
-                </>
-              ) : (
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {onDiscardItem && (
+              <div className="border-t border-slate-100 pt-2.5">
                 <button
-                  className="flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-[#b5604f] transition-colors hover:bg-[#fbebe8]"
-                  onClick={() =>
-                    setMenu((current) =>
-                      current ? { ...current, confirming: true } : current,
-                    )
-                  }
+                  type="button"
+                  className="flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-[0_2px_0_#e2e8f0] transition hover:bg-[#eef7fb] active:translate-y-[2px] active:shadow-none"
+                  onClick={() => {
+                    const { docId, id } = menu
+                    const discard = !menuItem?.discarded
+                    setMenu(null)
+                    void onDiscardItem(docId, id, discard)
+                  }}
                 >
-                  Excluir item
+                  {menuItem?.discarded ? 'Restaurar item' : 'Descartar item'}
                 </button>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+
+            {onDeleteItem && (
+              <div className="border-t border-slate-100 pt-2.5">
+                {menu.confirming ? (
+                  <>
+                    <p className="mb-2 text-xs text-slate-600">
+                      Excluir {menu.id}? Essa ação não pode ser desfeita.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="flex flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white py-1.5 text-xs font-semibold text-slate-700 shadow-[0_2px_0_#e2e8f0] transition hover:bg-slate-50 active:translate-y-[2px] active:shadow-none"
+                        onClick={() =>
+                          setMenu((current) =>
+                            current
+                              ? { ...current, confirming: false }
+                              : current,
+                          )
+                        }
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        className="flex flex-1 items-center justify-center rounded-lg bg-gradient-to-b from-[#d96b5e] to-[#b5483c] py-1.5 text-xs font-semibold text-white shadow-[0_3px_0_#8a3228] transition hover:brightness-110 active:translate-y-[2px] active:shadow-none"
+                        onClick={() => {
+                          const { docId, id } = menu
+                          setMenu(null)
+                          void onDeleteItem(docId, id)
+                        }}
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-center rounded-lg border border-[#f2c6c0] bg-[#fff5f4] px-3 py-1.5 text-xs font-semibold text-[#b5483c] shadow-[0_2px_0_#f2c6c0] transition hover:bg-[#fbebe8] active:translate-y-[2px] active:shadow-none"
+                    onClick={() =>
+                      setMenu((current) =>
+                        current ? { ...current, confirming: true } : current,
+                      )
+                    }
+                  >
+                    Excluir item
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </FloatingPanel>
       )}
     </div>
@@ -2108,6 +2281,7 @@ function NewItemModal({
         registeredAt: initialItem.rawRegisteredAt,
         categories: initialItem.categories,
         quantity: initialItem.quantity,
+        image: initialItem.image ?? '',
       }
     }
 
@@ -2122,6 +2296,7 @@ function NewItemModal({
       registeredAt: new Date().toLocaleDateString('en-CA'),
       categories: ['Sem garantia'],
       quantity: 1,
+      image: '',
     }
   })
 
@@ -2132,6 +2307,7 @@ function NewItemModal({
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [imageError, setImageError] = useState('')
 
   const itemTypesWithOptions = [...itemTypes, 'Outro']
 
@@ -2240,6 +2416,73 @@ function NewItemModal({
         </div>
 
         <div className="form-grid">
+          <div className="col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-700">
+              Imagem do item
+            </span>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl border border-[#b7d8ec] bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef] text-4xl">
+                {form.image ? (
+                  <img
+                    src={form.image}
+                    alt="Pré-visualização do item"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  getTypeIllustration(form.type || 'Outros')
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <label className="cursor-pointer rounded-lg bg-gradient-to-b from-[#3188bd] to-[#17649f] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_0_#104b78] transition hover:brightness-110 active:translate-y-1 active:shadow-none">
+                  {form.image ? 'Trocar imagem' : 'Adicionar imagem'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={async (event) => {
+                      const file = event.currentTarget.files?.[0]
+                      event.currentTarget.value = ''
+
+                      if (!file) return
+
+                      try {
+                        const image = await compressImage(file)
+                        setForm((current) => ({ ...current, image }))
+                        setImageError('')
+                      } catch {
+                        setImageError(
+                          'Não foi possível carregar essa imagem. Tente outro arquivo.',
+                        )
+                      }
+                    }}
+                  />
+                </label>
+
+                {form.image && (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[#a7d9c1] bg-[#e8f6ef] px-4 py-2 text-sm font-semibold text-[#24744f] transition hover:bg-[#d8f0e3]"
+                    onClick={() =>
+                      setForm((current) => ({ ...current, image: '' }))
+                    }
+                  >
+                    Remover imagem
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {imageError && (
+              <p className="mt-2 text-xs text-red-600">{imageError}</p>
+            )}
+
+            <p className="mt-2 text-xs text-slate-500">
+              A imagem é redimensionada e comprimida antes de ser salva.
+            </p>
+          </div>
+
           <label>
             Nome do item
             <input
