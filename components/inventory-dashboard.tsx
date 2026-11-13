@@ -73,6 +73,8 @@ type Item = {
   auction: boolean
   group: Group
   discarded: boolean
+  withdrawn: boolean
+  withdrawnQuantity: number
   quantity: number
   model: string
   serviceTag: string
@@ -240,7 +242,12 @@ function toItem(docId: string, data: DocumentData): Item {
     auction: Boolean(data.auction),
     group: data.group === 'Estoque' ? 'Estoque' : 'Inservíveis',
     discarded: Boolean(data.discarded),
-    quantity: Math.max(1, Number(data.quantity) || 1),
+    withdrawn: Boolean(data.withdrawn),
+    withdrawnQuantity: Math.max(0, Number(data.withdrawnQuantity) || 0),
+    quantity:
+      data.quantity == null
+        ? 1
+        : Math.max(0, Number(data.quantity) || 0),
     model: data.model ?? '',
     serviceTag: data.serviceTag ?? '',
     image: data.image ?? '',
@@ -274,6 +281,7 @@ async function createItem(data: NewItemData) {
       image: data.image,
       auction: false,
       discarded: false,
+      withdrawn: false,
       createdAt: serverTimestamp(),
     })
   })
@@ -837,7 +845,7 @@ function getTypeIllustration(type: string) {
 }
 
 function ItemsByType({ items }: { items: Item[] }) {
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null)
+  const [selectedType, setSelectedType] = useState<string | null>(null)
 
   const groups = useMemo(() => {
     const result = new Map<string, { items: Item[]; quantity: number }>()
@@ -858,6 +866,10 @@ function ItemsByType({ items }: { items: Item[] }) {
     )
   }, [items])
 
+  const selectedGroup = selectedType
+    ? groups.find(([type]) => type === selectedType)
+    : undefined
+
   return (
     <>
       {groups.length === 0 ? (
@@ -867,8 +879,14 @@ function ItemsByType({ items }: { items: Item[] }) {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {groups.map(([type, group]) => (
-            <div key={type} className="panel p-4">
-              <div className="mb-4 flex items-center gap-3">
+            <button
+              key={type}
+              type="button"
+              className="panel w-full cursor-pointer p-4 text-left transition hover:-translate-y-0.5 hover:border-[#b7d8ec] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-[#3685b7]"
+              onClick={() => setSelectedType(type)}
+              aria-label={`Abrir registros do tipo ${type}`}
+            >
+              <div className="flex items-center gap-3">
                 <div
                   className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#dceeff] to-[#c8f0e4] text-3xl ring-1 ring-[#9cc8e2]"
                   aria-hidden="true"
@@ -876,71 +894,43 @@ function ItemsByType({ items }: { items: Item[] }) {
                   {getTypeIllustration(type)}
                 </div>
 
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <h2 className="font-semibold text-slate-800">{type}</h2>
                   <p className="text-sm text-slate-500">
                     {group.quantity} unidades · {group.items.length}{' '}
                     {group.items.length === 1 ? 'registro' : 'registros'}
                   </p>
                 </div>
+
+                <ChevronRight size={19} className="shrink-0 text-slate-400" />
               </div>
 
-              <div className="space-y-2 border-t border-slate-100 pt-3">
-                {group.items.map((item) => (
-                  <button
-                    key={item.docId}
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-lg border border-transparent px-2 py-2 text-left transition hover:border-[#b7d8ec] hover:bg-[#f0f8ff] focus:outline-none focus:ring-2 focus:ring-[#3685b7]"
-                    onClick={() => setSelectedItem(item)}
-                    aria-label={`Ver imagem e detalhes de ${item.item}`}
-                  >
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-[#e2f0fa] to-[#dff4ed] text-xl">
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.item}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        getTypeIllustration(type)
-                      )}
-                    </span>
-
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm text-slate-700">
-                        {item.item}
-                      </span>
-                      <span className="block text-xs text-slate-500">
-                        ID: {item.id}
-                      </span>
-                    </span>
-
-                    <strong className="shrink-0 rounded-full bg-[#e4f2ec] px-2.5 py-1 text-sm text-[#24744f]">
-                      {item.quantity}
-                    </strong>
-                  </button>
-                ))}
-              </div>
-            </div>
+              <p className="mt-4 border-t border-slate-100 pt-3 text-xs font-medium text-[#2875a5]">
+                Clique para visualizar todos os registros
+              </p>
+            </button>
           ))}
         </div>
       )}
 
-      {selectedItem && (
-        <ItemImagePreview
-          item={selectedItem}
-          onClose={() => setSelectedItem(null)}
+      {selectedGroup && (
+        <TypeItemsModal
+          type={selectedGroup[0]}
+          items={selectedGroup[1].items}
+          onClose={() => setSelectedType(null)}
         />
       )}
     </>
   )
 }
 
-function ItemImagePreview({
-  item,
+function TypeItemsModal({
+  type,
+  items,
   onClose,
 }: {
-  item: Item
+  type: string
+  items: Item[]
   onClose: () => void
 }) {
   return (
@@ -951,57 +941,130 @@ function ItemImagePreview({
       }}
     >
       <div
-        className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl"
+        className="modal-card w-full max-w-4xl"
         role="dialog"
         aria-modal="true"
-        aria-label={`Imagem do item ${item.item}`}
+        aria-label={`Registros de ${type}`}
       >
-        <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="modal-head">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-[#2875a5]">
-              {item.type || 'Tipo não informado'}
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-800">
-              {item.item}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              ID: {item.id} · Quantidade: {item.quantity}
+            <p className="eyebrow">ITENS POR TIPO</p>
+            <h2>{type}</h2>
+            <p>
+              {items.reduce((total, item) => total + item.quantity, 0)} unidades
+              · {items.length} {items.length === 1 ? 'registro' : 'registros'}
             </p>
           </div>
 
           <button
             type="button"
-            className="rounded-lg p-2 text-slate-500 transition hover:bg-[#eaf4fb] hover:text-[#17649f]"
+            className="icon-button"
             onClick={onClose}
-            aria-label="Fechar imagem"
+            aria-label="Fechar registros"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef]">
-          {item.image ? (
-            <img
-              src={item.image}
-              alt={`Imagem de ${item.item}`}
-              className="max-h-[60vh] w-full object-contain"
-            />
-          ) : (
-            <div className="p-8 text-center">
-              <span className="text-7xl" aria-hidden="true">
-                {getTypeIllustration(item.type)}
-              </span>
-              <p className="mt-4 text-sm text-slate-600">
-                Este item ainda não tem uma imagem cadastrada.
-              </p>
-            </div>
-          )}
+        <div className="max-h-[65vh] space-y-3 overflow-y-auto pr-1">
+          {items.map((item) => (
+            <article
+              key={item.docId}
+              className="rounded-xl border border-slate-200 bg-white p-4"
+            >
+              <div className="flex flex-wrap items-start gap-4">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef] text-3xl">
+                  {item.image ? (
+                    <img
+                      src={item.image}
+                      alt={`Imagem de ${item.item}`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    getTypeIllustration(type)
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3 className="font-semibold text-slate-800">
+                        {item.item}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        ID: {item.id} · Cadastrado em {item.date || '—'}
+                      </p>
+                    </div>
+
+                    <span className="rounded-full bg-[#e4f2ec] px-3 py-1 text-sm font-semibold text-[#24744f]">
+                      Qtd.: {item.quantity}
+                    </span>
+                  </div>
+
+                  <dl className="mt-3 grid grid-cols-1 gap-x-5 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <dt className="text-xs text-slate-500">Categoria</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.group}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Modelo</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.model || '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Patrimônio</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.tag || '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Serial number</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.serial || '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Service tag</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.serviceTag || '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">Status</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.status || '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-slate-500">
+                        Quantidade já retirada
+                      </dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.withdrawnQuantity}
+                      </dd>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <dt className="text-xs text-slate-500">Subcategorias</dt>
+                      <dd className="font-medium text-slate-700">
+                        {item.categories.length > 0
+                          ? item.categories.join(', ')
+                          : '—'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </article>
+          ))}
         </div>
 
-        <div className="mt-4 flex justify-end">
+        <div className="modal-foot">
           <button
             type="button"
-            className="rounded-lg bg-gradient-to-b from-[#3188bd] to-[#17649f] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_0_#104b78] transition hover:brightness-110 active:translate-y-1 active:shadow-none"
+            className="primary-button"
             onClick={onClose}
           >
             Fechar
@@ -1024,6 +1087,7 @@ export default function InventoryDashboard() {
   const [downloadAnchor, setDownloadAnchor] = useState<DOMRect | null>(null)
   const [query, setQuery] = useState('')
   const [showNew, setShowNew] = useState(false)
+  const [showWithdrawal, setShowWithdrawal] = useState(false)
   const [editingItem, setEditingItem] = useState<Item | null>(null)
   const [showMobileNav, setShowMobileNav] = useState(false)
   const [toast, setToast] = useState('')
@@ -1058,7 +1122,7 @@ export default function InventoryDashboard() {
   }
 
   const activeItems = useMemo(
-    () => items.filter((item) => !item.discarded),
+    () => items.filter((item) => !item.discarded && !item.withdrawn),
     [items],
   )
 
@@ -1121,13 +1185,17 @@ export default function InventoryDashboard() {
     [inserviveisItems],
   )
 
-  const retiradosCount = useMemo(
-    () =>
-      inserviveisItems
-        .filter((item) => item.auction)
-        .reduce((sum, item) => sum + item.quantity, 0),
-    [inserviveisItems],
-  )
+  const retiradosCount = useMemo(() => {
+    const retiradasRegistradas = items.reduce(
+      (sum, item) => sum + item.withdrawnQuantity,
+      0,
+    )
+    const leiloados = inserviveisItems
+      .filter((item) => item.auction)
+      .reduce((sum, item) => sum + item.quantity, 0)
+
+    return retiradasRegistradas + leiloados
+  }, [items, inserviveisItems])
 
   const deleteItem = async (docId: string, itemId: string) => {
     try {
@@ -1168,6 +1236,111 @@ export default function InventoryDashboard() {
       quantity: Math.max(1, Number(data.quantity) || 1),
       image: data.image,
     })
+  }
+
+  const registerWithdrawal = async (type: string, requestedQuantity: number) => {
+    const candidates = items
+      .filter(
+        (item) =>
+          (item.type || 'Outros') === type &&
+          !item.discarded &&
+          !item.withdrawn &&
+          item.quantity > 0,
+      )
+      .sort((first, second) =>
+        first.rawRegisteredAt.localeCompare(second.rawRegisteredAt),
+      )
+
+    const availableQuantity = candidates.reduce(
+      (total, item) => total + item.quantity,
+      0,
+    )
+
+    if (requestedQuantity > availableQuantity) {
+      throw new Error(
+        `Quantidade indisponível. Existem ${availableQuantity} unidade(s) desse tipo.`,
+      )
+    }
+
+    const withdrawalRef = doc(collection(db, 'withdrawals'))
+
+    await runTransaction(db, async (transaction) => {
+      const snapshots = await Promise.all(
+        candidates.map((item) =>
+          transaction.get(doc(db, 'inserviveis', item.docId)),
+        ),
+      )
+
+      const currentRecords = snapshots
+        .map((snapshot, index) => ({
+          snapshot,
+          item: candidates[index],
+        }))
+        .filter(({ snapshot }) => snapshot.exists())
+
+      const currentAvailable = currentRecords.reduce(
+        (total, record) => {
+          const data = record.snapshot.data() ?? {}
+          if (data.discarded || data.withdrawn) return total
+          return total + Math.max(0, Number(data.quantity) || 0)
+        },
+        0,
+      )
+
+      if (requestedQuantity > currentAvailable) {
+        throw new Error(
+          `Estoque alterado durante a operação. Disponível agora: ${currentAvailable} unidade(s).`,
+        )
+      }
+
+      let remaining = requestedQuantity
+      const affectedRecords: {
+        docId: string
+        itemId: string
+        quantity: number
+      }[] = []
+
+      for (const { snapshot, item } of currentRecords) {
+        if (remaining <= 0) break
+
+        const data = snapshot.data() ?? {}
+        if (data.discarded || data.withdrawn) continue
+
+        const currentQuantity = Math.max(0, Number(data.quantity) || 0)
+        if (currentQuantity <= 0) continue
+
+        const quantityToWithdraw = Math.min(currentQuantity, remaining)
+        const newQuantity = currentQuantity - quantityToWithdraw
+
+        transaction.update(snapshot.ref, {
+          quantity: newQuantity,
+          withdrawn: newQuantity === 0,
+          status: newQuantity === 0 ? 'Retirado' : data.status || 'Armazenado',
+          lastWithdrawalAt: serverTimestamp(),
+          withdrawnQuantity:
+            (Number(data.withdrawnQuantity) || 0) + quantityToWithdraw,
+        })
+
+        affectedRecords.push({
+          docId: item.docId,
+          itemId: item.id,
+          quantity: quantityToWithdraw,
+        })
+
+        remaining -= quantityToWithdraw
+      }
+
+      transaction.set(withdrawalRef, {
+        type,
+        quantity: requestedQuantity,
+        records: affectedRecords,
+        createdAt: serverTimestamp(),
+      })
+    })
+
+    notify(
+      `Retirada de ${requestedQuantity} unidade(s) de ${type} registrada com sucesso.`,
+    )
   }
 
   const cadastradosNoMesCount = useMemo(() => {
@@ -1527,6 +1700,17 @@ export default function InventoryDashboard() {
             </div>
 
             <div className="heading-actions">
+              {activeSection === 'Itens por tipo' && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setShowWithdrawal(true)}
+                >
+                  <ArrowDownToLine size={16} />
+                  Registrar retirada
+                </button>
+              )}
+
               <button
                 className="secondary-button"
                 data-popover-trigger
@@ -1927,6 +2111,17 @@ export default function InventoryDashboard() {
         </div>
       </main>
 
+      {showWithdrawal && (
+        <WithdrawalModal
+          items={activeItems}
+          onClose={() => setShowWithdrawal(false)}
+          onSave={async (type, quantity) => {
+            await registerWithdrawal(type, quantity)
+            setShowWithdrawal(false)
+          }}
+        />
+      )}
+
       {showNew && (
         <NewItemModal
           onClose={() => setShowNew(false)}
@@ -2257,6 +2452,182 @@ function InventoryTable({
   )
 }
 
+function WithdrawalModal({
+  items,
+  onClose,
+  onSave,
+}: {
+  items: Item[]
+  onClose: () => void
+  onSave: (type: string, quantity: number) => Promise<void>
+}) {
+  const availableTypes = useMemo(() => {
+    const totals = new Map<string, number>()
+
+    items.forEach((item) => {
+      if (item.discarded || item.withdrawn || item.quantity <= 0) return
+      const type = item.type || 'Outros'
+      totals.set(type, (totals.get(type) ?? 0) + item.quantity)
+    })
+
+    return Array.from(totals.entries()).sort(([first], [second]) =>
+      first.localeCompare(second),
+    )
+  }, [items])
+
+  const [type, setType] = useState(availableTypes[0]?.[0] ?? '')
+  const [quantity, setQuantity] = useState(1)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (
+      availableTypes.length > 0 &&
+      !availableTypes.some(([itemType]) => itemType === type)
+    ) {
+      setType(availableTypes[0][0])
+      setQuantity(1)
+    }
+  }, [availableTypes, type])
+
+  const availableQuantity =
+    availableTypes.find(([itemType]) => itemType === type)?.[1] ?? 0
+
+  const submit = async () => {
+    if (!type) {
+      setError('Selecione o tipo de item.')
+      return
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      setError('Informe um quantitativo inteiro maior que zero.')
+      return
+    }
+
+    if (quantity > availableQuantity) {
+      setError(`Quantidade máxima disponível: ${availableQuantity}.`)
+      return
+    }
+
+    setSaving(true)
+    setError('')
+
+    try {
+      await onSave(type, quantity)
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Não foi possível registrar a retirada.',
+      )
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose()
+      }}
+    >
+      <div
+        className="modal-card w-full max-w-lg"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Registrar retirada de itens"
+      >
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">MOVIMENTAÇÃO DE ESTOQUE</p>
+            <h2>Registrar retirada</h2>
+            <p>Selecione o tipo de item e informe a quantidade retirada.</p>
+          </div>
+
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            disabled={saving}
+            aria-label="Fechar"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {availableTypes.length === 0 ? (
+          <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+            Não há itens disponíveis para retirada.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">
+                Tipo de item
+              </span>
+              <select
+                className="w-full"
+                value={type}
+                onChange={(event) => {
+                  setType(event.target.value)
+                  setQuantity(1)
+                  setError('')
+                }}
+              >
+                {availableTypes.map(([itemType, total]) => (
+                  <option key={itemType} value={itemType}>
+                    {itemType} · {total} disponível(is)
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">
+                Quantitativo a retirar
+              </span>
+              <input
+                type="number"
+                min="1"
+                max={availableQuantity}
+                step="1"
+                value={quantity}
+                onChange={(event) =>
+                  setQuantity(Math.max(1, Number(event.target.value) || 1))
+                }
+              />
+              <span className="mt-1 block text-xs text-slate-500">
+                Quantidade disponível: {availableQuantity}
+              </span>
+            </label>
+          </div>
+        )}
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        <div className="modal-foot">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void submit()}
+            disabled={saving || availableTypes.length === 0}
+          >
+            {saving ? 'Registrando...' : 'Confirmar retirada'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function NewItemModal({
   onClose,
   onSave,
@@ -2435,7 +2806,7 @@ function NewItemModal({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <label className="cursor-pointer rounded-lg bg-gradient-to-b from-[#3188bd] to-[#17649f] px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_0_#104b78] transition hover:brightness-110 active:translate-y-1 active:shadow-none">
+                <label className="cursor-pointer rounded-lg bg-gradient-to-b from-[#3188bd] to-[#17649f] px-4 py-2 text-sm font-semibold !text-white shadow-[0_4px_0_#104b78] transition hover:brightness-110 active:translate-y-1 active:shadow-none">
                   {form.image ? 'Trocar imagem' : 'Adicionar imagem'}
                   <input
                     type="file"
