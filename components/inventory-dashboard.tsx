@@ -22,11 +22,9 @@ import {
   PackageCheck,
   Plus,
   Search,
-  Settings2,
   ShieldAlert,
   Tag,
   Trash2,
-  Truck,
   X,
 } from 'lucide-react'
 import { signOut } from 'firebase/auth'
@@ -58,6 +56,13 @@ import {
 
 type Group = 'Inservíveis' | 'Estoque'
 
+type MetricFilterKey =
+  | 'inserviveis'
+  | 'estoque'
+  | 'aguardandoLeilao'
+  | 'cadastradosMes'
+  | 'descartados'
+
 type Item = {
   docId: string
   id: string
@@ -79,6 +84,8 @@ type Item = {
   model: string
   serviceTag: string
   image: string
+  edited?: boolean
+  updatedAt?: string
 }
 
 type NewItemData = {
@@ -251,6 +258,8 @@ function toItem(docId: string, data: DocumentData): Item {
     model: data.model ?? '',
     serviceTag: data.serviceTag ?? '',
     image: data.image ?? '',
+    edited: Boolean(data.edited || data.updatedAt),
+    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
   }
 }
 
@@ -282,6 +291,7 @@ async function createItem(data: NewItemData) {
       auction: false,
       discarded: false,
       withdrawn: false,
+      edited: false,
       createdAt: serverTimestamp(),
     })
   })
@@ -293,12 +303,14 @@ function MetricCard({
   detail,
   icon: Icon,
   tone = 'blue',
+  onClick,
 }: {
   label: string
   value: string | number
   detail: string
   icon: typeof Box
   tone?: string
+  onClick?: () => void
 }) {
   const tones: Record<string, string> = {
     blue: 'bg-[#e6f0f7] text-[#3b6f94]',
@@ -309,16 +321,21 @@ function MetricCard({
   }
 
   return (
-    <div className="metric-card">
+    <button
+      type="button"
+      onClick={onClick}
+      className="metric-card w-full cursor-pointer text-left transition duration-150 hover:-translate-y-0.5 hover:border-[#9cc8e2] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#3685b7]"
+    >
       <div className={`metric-icon ${tones[tone]}`}>
         <Icon size={19} strokeWidth={1.8} />
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="metric-label">{label}</p>
         <p className="metric-value">{value}</p>
         <p className="metric-detail">{detail}</p>
       </div>
-    </div>
+      <ChevronRight size={16} className="shrink-0 text-slate-400" />
+    </button>
   )
 }
 
@@ -851,7 +868,7 @@ function ItemsByType({ items }: { items: Item[] }) {
     const result = new Map<string, { items: Item[]; quantity: number }>()
 
     items
-      .filter((item) => !item.discarded)
+      .filter((item) => !item.discarded && !item.withdrawn)
       .forEach((item) => {
         const type = item.type || 'Outros'
         const current = result.get(type) ?? { items: [], quantity: 0 }
@@ -877,39 +894,92 @@ function ItemsByType({ items }: { items: Item[] }) {
           Nenhum item cadastrado.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {groups.map(([type, group]) => (
-            <button
-              key={type}
-              type="button"
-              className="panel w-full cursor-pointer p-4 text-left transition hover:-translate-y-0.5 hover:border-[#b7d8ec] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-[#3685b7]"
-              onClick={() => setSelectedType(type)}
-              aria-label={`Abrir registros do tipo ${type}`}
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#dceeff] to-[#c8f0e4] text-3xl ring-1 ring-[#9cc8e2]"
-                  aria-hidden="true"
-                >
-                  {getTypeIllustration(type)}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {groups.map(([type, group]) => {
+            const itemsWithPhoto = group.items.filter((entry) => entry.image)
+            const coverImage = itemsWithPhoto[0]?.image
+
+            return (
+              <button
+                key={type}
+                type="button"
+                className="panel flex w-full cursor-pointer flex-col overflow-hidden p-0 text-left transition duration-150 hover:-translate-y-1 hover:border-[#9cc8e2] hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-[#3685b7]"
+                onClick={() => setSelectedType(type)}
+                aria-label={`Abrir registros do tipo ${type}`}
+              >
+                <div className="relative flex h-64 w-full items-center justify-center overflow-hidden border-b border-slate-100 bg-gradient-to-br from-[#dceeff] to-[#c8f0e4]">
+                  {coverImage ? (
+                    <img
+                      src={coverImage}
+                      alt={type}
+                      className="h-full w-full object-cover transition duration-300 hover:scale-105"
+                    />
+                  ) : (
+                    <span className="text-8xl" aria-hidden="true">
+                      {getTypeIllustration(type)}
+                    </span>
+                  )}
+
+                  <span className="absolute right-3 top-3 rounded-full bg-white/95 px-3.5 py-1.5 text-xs font-bold text-[#24744f] shadow-sm backdrop-blur-sm">
+                    {group.quantity}{' '}
+                    {group.quantity === 1 ? 'unidade' : 'unidades'}
+                  </span>
                 </div>
 
-                <div className="min-w-0 flex-1">
-                  <h2 className="font-semibold text-slate-800">{type}</h2>
-                  <p className="text-sm text-slate-500">
-                    {group.quantity} unidades · {group.items.length}{' '}
-                    {group.items.length === 1 ? 'registro' : 'registros'}
+                <div className="flex flex-1 flex-col justify-between p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-xl font-bold text-slate-800">
+                        {type}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {group.items.length}{' '}
+                        {group.items.length === 1
+                          ? 'registro cadastrado'
+                          : 'registros cadastrados'}
+                      </p>
+                    </div>
+
+                    <ChevronRight
+                      size={20}
+                      className="mt-1 shrink-0 text-slate-400"
+                    />
+                  </div>
+
+                  {itemsWithPhoto.length > 0 && (
+                    <div className="mt-4">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Fotos cadastradas ({itemsWithPhoto.length})
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {itemsWithPhoto.slice(0, 4).map((entry) => (
+                          <div
+                            key={entry.docId}
+                            className="h-14 w-14 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-xs"
+                          >
+                            <img
+                              src={entry.image}
+                              alt={entry.item}
+                              className="h-full w-full object-cover"
+                            />
+                          </div>
+                        ))}
+                        {itemsWithPhoto.length > 4 && (
+                          <span className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                            +{itemsWithPhoto.length - 4}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="mt-4 border-t border-slate-100 pt-3 text-xs font-semibold text-[#2875a5]">
+                    Clique para visualizar todos os registros e fotos
                   </p>
                 </div>
-
-                <ChevronRight size={19} className="shrink-0 text-slate-400" />
-              </div>
-
-              <p className="mt-4 border-t border-slate-100 pt-3 text-xs font-medium text-[#2875a5]">
-                Clique para visualizar todos os registros
-              </p>
-            </button>
-          ))}
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -966,14 +1036,14 @@ function TypeItemsModal({
           </button>
         </div>
 
-        <div className="max-h-[65vh] space-y-3 overflow-y-auto pr-1">
+        <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
           {items.map((item) => (
             <article
               key={item.docId}
-              className="rounded-xl border border-slate-200 bg-white p-4"
+              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
             >
-              <div className="flex flex-wrap items-start gap-4">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef] text-3xl">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <div className="flex h-40 w-full shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef] text-5xl sm:w-40">
                   {item.image ? (
                     <img
                       src={item.image}
@@ -988,7 +1058,7 @@ function TypeItemsModal({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <h3 className="font-semibold text-slate-800">
+                      <h3 className="text-base font-semibold text-slate-800">
                         {item.item}
                       </h3>
                       <p className="text-xs text-slate-500">
@@ -1075,6 +1145,163 @@ function TypeItemsModal({
   )
 }
 
+function MetricItemsModal({
+  title,
+  subtitle,
+  items,
+  onClose,
+}: {
+  title: string
+  subtitle: string
+  items: Item[]
+  onClose: () => void
+}) {
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="modal-card w-full max-w-4xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">VISÃO GERAL · DETALHAMENTO</p>
+            <h2>{title}</h2>
+            <p>
+              {subtitle} · {items.length}{' '}
+              {items.length === 1 ? 'item encontrado' : 'itens encontrados'}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Fechar janela"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="max-h-[65vh] space-y-3 overflow-y-auto pr-1">
+          {items.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+              Nenhum item relacionado a este indicador no momento.
+            </div>
+          ) : (
+            items.map((item) => (
+              <article
+                key={item.docId}
+                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                  <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-gradient-to-br from-[#eaf4fb] to-[#e6f6ef] text-3xl">
+                    {item.image ? (
+                      <img
+                        src={item.image}
+                        alt={item.item}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      getTypeIllustration(item.type)
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold text-slate-800">
+                            {item.item}
+                          </h3>
+                          {item.edited && (
+                            <span className="rounded-full bg-[#fbf1de] px-2 py-0.5 text-[11px] font-semibold text-[#a9741f]">
+                              Editado
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          {item.id} · {item.type || 'Outros'} · Cadastrado em{' '}
+                          {item.date || '—'}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-[#e6f0f7] px-2.5 py-1 text-xs font-semibold text-[#3b6f94]">
+                          {item.group}
+                        </span>
+                        <span className="rounded-full bg-[#e4f2ec] px-2.5 py-1 text-xs font-semibold text-[#24744f]">
+                          Qtd.: {item.quantity}
+                        </span>
+                      </div>
+                    </div>
+
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+                      <div>
+                        <dt className="text-slate-400">Patrimônio</dt>
+                        <dd className="font-medium text-slate-700">
+                          {item.tag || '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400">Serial</dt>
+                        <dd className="font-medium text-slate-700">
+                          {item.serial || '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400">Status</dt>
+                        <dd className="font-medium text-slate-700">
+                          {item.status}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-400">Leiloado</dt>
+                        <dd className="font-medium text-slate-700">
+                          {item.auction ? 'Sim' : 'Não'}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    {item.categories.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {item.categories.map((cat) => (
+                          <span
+                            key={cat}
+                            className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                          >
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onClose}
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function InventoryDashboard() {
   const [activeSection, setActiveSection] = useState('Visão geral')
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
@@ -1089,6 +1316,8 @@ export default function InventoryDashboard() {
   const [showNew, setShowNew] = useState(false)
   const [showWithdrawal, setShowWithdrawal] = useState(false)
   const [editingItem, setEditingItem] = useState<Item | null>(null)
+  const [selectedMetricModal, setSelectedMetricModal] =
+    useState<MetricFilterKey | null>(null)
   const [showMobileNav, setShowMobileNav] = useState(false)
   const [toast, setToast] = useState('')
   const [selectedPeriod, setSelectedPeriod] = useState('2026-2027')
@@ -1166,36 +1395,94 @@ export default function InventoryDashboard() {
     0,
   )
 
-  const descartadosCount = useMemo(
-    () =>
-      items
-        .filter((item) => item.discarded)
-        .reduce((sum, item) => sum + item.quantity, 0),
+  const discardedItemsList = useMemo(
+    () => items.filter((item) => item.discarded),
     [items],
+  )
+
+  const descartadosCount = useMemo(
+    () => discardedItemsList.reduce((sum, item) => sum + item.quantity, 0),
+    [discardedItemsList],
+  )
+
+  const aguardandoLeilaoItemsList = useMemo(
+    () =>
+      inserviveisItems.filter(
+        (item) => item.categories.includes('Sem garantia') && !item.auction,
+      ),
+    [inserviveisItems],
   )
 
   const aguardandoLeilaoCount = useMemo(
     () =>
-      inserviveisItems
-        .filter(
-          (item) =>
-            item.categories.includes('Sem garantia') && !item.auction,
-        )
-        .reduce((sum, item) => sum + item.quantity, 0),
-    [inserviveisItems],
+      aguardandoLeilaoItemsList.reduce((sum, item) => sum + item.quantity, 0),
+    [aguardandoLeilaoItemsList],
   )
 
-  const retiradosCount = useMemo(() => {
-    const retiradasRegistradas = items.reduce(
-      (sum, item) => sum + item.withdrawnQuantity,
-      0,
-    )
-    const leiloados = inserviveisItems
-      .filter((item) => item.auction)
-      .reduce((sum, item) => sum + item.quantity, 0)
+  const cadastradosNoMesItemsList = useMemo(() => {
+    const now = new Date()
+    const currentYear = now.getFullYear()
+    const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
+    const prefix = `${currentYear}-${currentMonth}`
 
-    return retiradasRegistradas + leiloados
-  }, [items, inserviveisItems])
+    return items.filter(
+      (item) =>
+        item.rawRegisteredAt && item.rawRegisteredAt.startsWith(prefix),
+    )
+  }, [items])
+
+  const cadastradosNoMesCount = useMemo(
+    () =>
+      cadastradosNoMesItemsList.reduce((sum, item) => sum + item.quantity, 0),
+    [cadastradosNoMesItemsList],
+  )
+
+  const metricModalData = useMemo(() => {
+    if (!selectedMetricModal) return null
+
+    const sortEditedFirst = (list: Item[]) =>
+      [...list].sort((a, b) => Number(Boolean(b.edited)) - Number(Boolean(a.edited)))
+
+    switch (selectedMetricModal) {
+      case 'inserviveis':
+        return {
+          title: 'Total de Inservíveis',
+          subtitle: 'Itens ativos classificados como inservíveis',
+          items: sortEditedFirst(inserviveisItems),
+        }
+      case 'estoque':
+        return {
+          title: 'Total de Estoque',
+          subtitle: 'Itens ativos disponíveis no estoque',
+          items: sortEditedFirst(estoqueItems),
+        }
+      case 'aguardandoLeilao':
+        return {
+          title: 'Aguardando leilão',
+          subtitle: 'Inservíveis sem garantia ainda não leiloados',
+          items: sortEditedFirst(aguardandoLeilaoItemsList),
+        }
+      case 'cadastradosMes':
+        return {
+          title: 'Cadastrados no mês',
+          subtitle: 'Itens de inservíveis e estoque registrados neste mês',
+          items: sortEditedFirst(cadastradosNoMesItemsList),
+        }
+      case 'descartados':
+        return {
+          title: 'Itens Descartados',
+          subtitle: 'Materiais marcados como descartados no sistema',
+          items: sortEditedFirst(discardedItemsList),
+        }
+    }
+  }, [
+    selectedMetricModal,
+    inserviveisItems,
+    estoqueItems,
+    aguardandoLeilaoItemsList,
+    cadastradosNoMesItemsList,
+    discardedItemsList,
+  ])
 
   const deleteItem = async (docId: string, itemId: string) => {
     try {
@@ -1215,6 +1502,8 @@ export default function InventoryDashboard() {
       await updateDoc(doc(db, 'inserviveis', docId), {
         discarded: value,
         status: value ? 'Descartado' : 'Armazenado',
+        edited: true,
+        updatedAt: serverTimestamp(),
       })
       notify(value ? `Item ${itemId} descartado` : `Item ${itemId} restaurado`)
     } catch {
@@ -1235,6 +1524,8 @@ export default function InventoryDashboard() {
       categories: data.categories,
       quantity: Math.max(1, Number(data.quantity) || 1),
       image: data.image,
+      edited: true,
+      updatedAt: serverTimestamp(),
     })
   }
 
@@ -1278,14 +1569,11 @@ export default function InventoryDashboard() {
         }))
         .filter(({ snapshot }) => snapshot.exists())
 
-      const currentAvailable = currentRecords.reduce(
-        (total, record) => {
-          const data = record.snapshot.data() ?? {}
-          if (data.discarded || data.withdrawn) return total
-          return total + Math.max(0, Number(data.quantity) || 0)
-        },
-        0,
-      )
+      const currentAvailable = currentRecords.reduce((total, record) => {
+        const data = record.snapshot.data() ?? {}
+        if (data.discarded || data.withdrawn) return total
+        return total + Math.max(0, Number(data.quantity) || 0)
+      }, 0)
 
       if (requestedQuantity > currentAvailable) {
         throw new Error(
@@ -1316,7 +1604,9 @@ export default function InventoryDashboard() {
           quantity: newQuantity,
           withdrawn: newQuantity === 0,
           status: newQuantity === 0 ? 'Retirado' : data.status || 'Armazenado',
+          edited: true,
           lastWithdrawalAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
           withdrawnQuantity:
             (Number(data.withdrawnQuantity) || 0) + quantityToWithdraw,
         })
@@ -1342,20 +1632,6 @@ export default function InventoryDashboard() {
       `Retirada de ${requestedQuantity} unidade(s) de ${type} registrada com sucesso.`,
     )
   }
-
-  const cadastradosNoMesCount = useMemo(() => {
-    const now = new Date()
-    const currentYear = now.getFullYear()
-    const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
-    const prefix = `${currentYear}-${currentMonth}`
-
-    return items
-      .filter(
-        (item) =>
-          item.rawRegisteredAt && item.rawRegisteredAt.startsWith(prefix),
-      )
-      .reduce((sum, item) => sum + item.quantity, 0)
-  }, [items])
 
   const pieInserviveis = useMemo(
     () => buildTypeDistribution(inserviveisItems),
@@ -1413,6 +1689,8 @@ export default function InventoryDashboard() {
     try {
       await updateDoc(doc(db, 'inserviveis', target.docId), {
         auction: value,
+        edited: true,
+        updatedAt: serverTimestamp(),
       })
     } catch {
       notify('Não foi possível salvar a alteração')
@@ -1622,19 +1900,6 @@ export default function InventoryDashboard() {
         </nav>
 
         <div className="sidebar-bottom">
-          <button
-            className={`nav-link ${
-              activeSection === 'Configurações' ? 'active' : ''
-            }`}
-            onClick={() => {
-              setActiveSection('Configurações')
-              setShowMobileNav(false)
-            }}
-          >
-            <Settings2 size={18} />
-            Configurações
-          </button>
-
           <button className="nav-link" onClick={() => void signOut(auth)}>
             <LogOut size={18} />
             Sair
@@ -1805,21 +2070,7 @@ export default function InventoryDashboard() {
             </div>
           </div>
 
-          {activeSection === 'Configurações' ? (
-            <div className="panel p-8 text-center text-slate-600">
-              <Settings2
-                size={48}
-                className="mx-auto mb-4 text-slate-400"
-              />
-              <h2 className="text-xl font-bold text-slate-800">
-                Configurações do Sistema
-              </h2>
-              <p className="mt-2 text-sm text-slate-500">
-                Esta tela está em desenvolvimento. Em breve você poderá editar
-                perfis, permissões e parâmetros do sistema por aqui.
-              </p>
-            </div>
-          ) : activeSection === 'Itens por tipo' ? (
+          {activeSection === 'Itens por tipo' ? (
             <ItemsByType items={items} />
           ) : activeSection === 'Visão geral' ? (
             <>
@@ -1829,6 +2080,7 @@ export default function InventoryDashboard() {
                   value={totalInserviveis}
                   detail="unidades cadastradas"
                   icon={Box}
+                  onClick={() => setSelectedMetricModal('inserviveis')}
                 />
                 <MetricCard
                   label="Total de Estoque"
@@ -1836,6 +2088,7 @@ export default function InventoryDashboard() {
                   detail="unidades em estoque"
                   icon={Archive}
                   tone="green"
+                  onClick={() => setSelectedMetricModal('estoque')}
                 />
                 <MetricCard
                   label="Aguardando leilão"
@@ -1843,6 +2096,7 @@ export default function InventoryDashboard() {
                   detail="unidades sem garantia"
                   icon={Gavel}
                   tone="amber"
+                  onClick={() => setSelectedMetricModal('aguardandoLeilao')}
                 />
                 <MetricCard
                   label="Cadastrados no mês"
@@ -1850,17 +2104,7 @@ export default function InventoryDashboard() {
                   detail="inservíveis e estoque"
                   icon={ClipboardList}
                   tone="green"
-                />
-                <MetricCard
-                  label="Retirados / Leiloados"
-                  value={retiradosCount}
-                  detail={`${
-                    totalInserviveis > 0
-                      ? ((retiradosCount / totalInserviveis) * 100).toFixed(1)
-                      : 0
-                  }% dos inservíveis`}
-                  icon={Truck}
-                  tone="navy"
+                  onClick={() => setSelectedMetricModal('cadastradosMes')}
                 />
                 <MetricCard
                   label="Descartados"
@@ -1872,6 +2116,7 @@ export default function InventoryDashboard() {
                   }
                   icon={Trash2}
                   tone="red"
+                  onClick={() => setSelectedMetricModal('descartados')}
                 />
               </div>
 
@@ -2110,6 +2355,15 @@ export default function InventoryDashboard() {
           )}
         </div>
       </main>
+
+      {metricModalData && (
+        <MetricItemsModal
+          title={metricModalData.title}
+          subtitle={metricModalData.subtitle}
+          items={metricModalData.items}
+          onClose={() => setSelectedMetricModal(null)}
+        />
+      )}
 
       {showWithdrawal && (
         <WithdrawalModal
